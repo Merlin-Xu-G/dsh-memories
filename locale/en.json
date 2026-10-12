@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH Memories",
+    "description": "Personal memory for DSH: injects a global long-term index, a global short-term note, and a workspace memory index into every new session; the /memory command saves and previews memories."
+  }
+}

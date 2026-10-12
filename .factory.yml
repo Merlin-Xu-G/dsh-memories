@@ -1,0 +1,33 @@
+# Per-project overrides for the /factory pipeline — dsh-memories repository.
+#
+# This repo is built WITH factory discipline but has no lint/test/deploy
+# infrastructure of its own, so only the plan and implement phases run.
+# Guardrails/test/regression/evaluate are replaced by the builder's manual
+# verification bar (node --check, JSON parse, real listing, machine-path
+# scan, dry-run smoke), quoted in the report to the Lead.
+phases:
+  plan: true
+  implement: true
+  guardrails: false
+  test: false
+  regression: false
+  evaluate: false
+
+phasePrompts:
+  plan: |
+    Plan one todo per deliverable file (package.json, cordis.patch.yml,
+    index.js, locale/en.json, locale/zh.json, README.md, AGENTS.md) plus a
+    final verification todo. The design doc is my-dsh\.tmp\memories-dev-design.md
+    (scratch); the inspected contracts are listed in its "Inspected contracts"
+    section and must not be re-derived by guessing.
+  implement: |
+    Write the bundle files at the repo root. index.js must stay dependency-free
+    (node:* imports only), register the agent/pre-step baseline injector and the
+    /memory command inside ctx.inject(['commands'], ...), and never let a memory
+    error break a step (fail-open with ctx.logger.warn). No machine-specific
+    absolute paths anywhere; DSH_HOME = configured ?? env DSH_HOME (non-blank)
+    ?? ~/.dsh. Verify with node --check on every .js, JSON.parse on every .json,
+    a real directory listing, and a machine-path scan (the user name, the
+    workspace root, and the profile root must not appear as path literals),
+    plus a dry-run smoke of the injection builder with a temporary DSH_HOME
+    under my-dsh\.tmp.
