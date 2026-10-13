@@ -10,8 +10,9 @@
  *    ("what DSH is working on right now"), appended by `/memory save` and the
  *    agent `memory` tool.
  * 3. WORKSPACE — the same long-term mechanism scoped to the current workspace,
- *    stored inside the workspace at `<projectRoot>/.dsh/memories/` so it travels
- *    with the repository (like AGENTS.md).
+ *    stored centrally under `$DSH_HOME/memories/workspace/<workspacename>/`
+ *    (one directory per workspace; the name is the registered workspace
+ *    title when the root is registered, else the root directory's name).
  *
  * Injection follows the shipped `@deepseek-ai/dsh-agent-instructions` pattern:
  * at the first eligible `agent/pre-step` of a session, one durable user-role
@@ -27,8 +28,9 @@
  *
  * Writing happens through three coordinated surfaces that share one code path:
  * the `/memory` human command (save | long | workspace | show), the `memory`
- * agent tool (the same actions, callable by the model), and the web UI's
- * read-only snapshot. The plugin never writes at injection time.
+ * agent tool (the same actions, callable by the model), and the Memories
+ * tab's read-only HTTP endpoints (the list snapshot and the file detail).
+ * The plugin never writes at injection time.
  *
  * Contracts coded against (verified by live inspection of the installed
  * Harness and by reading the extracted built sources of the shipped plugins;
@@ -62,8 +64,10 @@
  *   (dsh-host-webserver): `route = { kind: 'exact' | 'prefix', path,
  *   handler(req, res) }`; exact routes win over prefixes; duplicates throw.
  *   Handlers own the full node:http response lifecycle.
- * - `ctx.workspaceRegistry.list()` — `Promise<Workspace[]>`; each Workspace
- *   exposes `.path` (canonical absolute) and `.title`.
+ * - `ctx.agents.get(sessionId)` from the `agents` service — the live Agent
+ *   of a session (`undefined` when it is not live); its
+ *   `agent.session.header.cwd` is the session's working directory, which the
+ *   snapshot route resolves to the requesting Memories tab's workspace.
  * - `ctx.inject(['commands'], callback)` (cordis Context.inject) starts a
  *   child plugin only while every named service exists and returns its
  *   fiber, whose `dispose()` is this plugin's cleanup.
@@ -72,17 +76,20 @@
  * - DSH home precedence (dsh-home-paths `resolveDshHome`): explicit configured
  *   path, then a non-blank `$DSH_HOME`, then `~/.dsh`.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 /** Layout under the resolved DSH home (never a machine-specific absolute path in code). */
 const MEMORIES_DIR = 'memories';
 const GLOBAL_LONG_TERM_DIRNAME = 'global-long-term';
 const GLOBAL_SHORT_TERM_FILENAME = 'global-short-term.md';
-/** Layout inside a workspace for the workspace-scoped memory. */
-const WORKSPACE_MEMORY_SEGMENTS = ['.dsh', 'memories'];
+/**
+ * Workspace memories live under the DSH home too, one directory per
+ * workspace: `$DSH_HOME/memories/workspace/<workspacename>/`.
+ */
+const WORKSPACE_MEMORIES_DIRNAME = 'workspace';
 /** The injected artifact of each long-term store. */
 const INDEX_FILENAME = 'INDEX.md';
 /** Cap on one source memory file read, to bound work on pathological files. */
@@ -256,6 +263,60 @@ function globalLongTermDir(dshHome) {
 /** Global short-term note file under a resolved DSH home. */
 function globalShortTermFile(dshHome) {
   return join(dshHome, MEMORIES_DIR, GLOBAL_SHORT_TERM_FILENAME);
+}
+
+/**
+ * Slugify a workspace NAME for one directory under
+ * `$DSH_HOME/memories/workspace/`. Unlike the file-name slug this keeps
+ * Unicode letters and digits (workspace names are often localized), clamps
+ * the length, and stays Windows-reserved-safe; an empty result falls back
+ * to a short stable hash of the origin string.
+ * @param {string} name the workspace name (registered title or directory).
+ * @param {string} origin string hashed for the empty-slug fallback.
+ * @returns {string}
+ */
+function workspaceSlug(name, origin) {
+  const slug = name
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '');
+  if (slug === '') {
+    return `ws-${createHash('sha256').update(origin).digest('hex').slice(0, 10)}`;
+  }
+  return WINDOWS_RESERVED_NAMES.has(slug.toLowerCase()) ? `ws-${slug}` : slug;
+}
+
+/**
+ * Resolve one session's workspace memory store: the project root (marker
+ * climb), the workspace NAME (registered workspace title when the root is a
+ * registered workspace, else the root directory's name), and the store
+ * directory `$DSH_HOME/memories/workspace/<workspacename>/`.
+ *
+ * @param {{ dshHome: string, cwd: string }} paths resolved locations.
+ * @param {ReturnType<typeof resolveConfig>} resolved validated config.
+ * @param {{ resolveByPath?: (path: string) => Promise<{ title?: unknown } | undefined> } | undefined} registry
+ *   optional workspaceRegistry service (fail-soft: without it the root's
+ *   directory name is the workspace name).
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ root: string, name: string, dir: string }>}
+ */
+export async function resolveWorkspaceStore({ dshHome, cwd }, resolved, registry, signal) {
+  const root = await findProjectRoot(cwd, resolved.projectRootMarkers);
+  let name = basename(root);
+  try {
+    const workspace = await registry?.resolveByPath?.(root);
+    const title = workspace?.title;
+    if (typeof title === 'string' && title.trim() !== '') name = title.trim();
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    // Fail-open: an unusable registry falls back to the directory name.
+  }
+  signal?.throwIfAborted();
+  const slug = workspaceSlug(name, root);
+  return { root, name, dir: join(dshHome, MEMORIES_DIR, WORKSPACE_MEMORIES_DIRNAME, slug) };
 }
 
 /* --------------------------------------------------------------------------
@@ -466,14 +527,13 @@ const BASELINE_INTRO = [
  * session's resolved memory locations and the write path that is actually
  * available (agent `memory` tool, or the human `/memory` command).
  *
- * @param {{ dshHome: string, projectRoot: string }} paths resolved locations.
+ * @param {{ dshHome: string, workspaceDir: string }} paths resolved locations.
  * @param {boolean} memoryToolAvailable whether the agent tool is registered.
  * @returns {string} guidance body (frame-safe: contains no memory content).
  */
-function renderGuidance({ dshHome, projectRoot }, memoryToolAvailable) {
+function renderGuidance({ dshHome, workspaceDir }, memoryToolAvailable) {
   const longTermDir = join(dshHome, MEMORIES_DIR, GLOBAL_LONG_TERM_DIRNAME);
   const shortTermFile = join(dshHome, MEMORIES_DIR, GLOBAL_SHORT_TERM_FILENAME);
-  const workspaceDir = join(projectRoot, ...WORKSPACE_MEMORY_SEGMENTS);
   const writePath = memoryToolAvailable
     ? [
       '- Write memories yourself with the `memory` tool when you learn something',
@@ -498,9 +558,9 @@ function renderGuidance({ dshHome, projectRoot }, memoryToolAvailable) {
     `2. **Global short-term** — one rolling note "what DSH is working on right now":`,
     '   current tasks, pickup points, recent decisions. Timestamped entries, oldest',
     `   drop off. File: \`${escapeFrameBody(shortTermFile)}\`.`,
-    '3. **Workspace** — project-local knowledge that travels with this repository.',
-    `   Files under \`${escapeFrameBody(workspaceDir)}\`, injected as its index for`,
-    '   sessions in this workspace only.',
+    '3. **Workspace** — project-local knowledge for this workspace, stored',
+    `   centrally under \`${escapeFrameBody(workspaceDir)}\` (one directory per`,
+    '   workspace), injected as its index for sessions in this workspace only.',
     '',
     'Standing rules:',
     '',
@@ -575,8 +635,8 @@ export function buildBaselineText({ guidance, longTerm, shortTerm, workspace }, 
   }
   if (workspace !== undefined) {
     const source = workspace.generated
-      ? '(generated from the files in .dsh/memories/ of this workspace — no INDEX.md yet)'
-      : '(from .dsh/memories/INDEX.md of this workspace)';
+      ? '(generated from the files in this workspace\'s memory directory — no INDEX.md yet)'
+      : '(from this workspace memory directory\'s INDEX.md)';
     parts.push([
       '## Workspace memory — index',
       '',
@@ -597,20 +657,21 @@ export function buildBaselineText({ guidance, longTerm, shortTerm, workspace }, 
 /**
  * Load the three scopes for one session and compose the baseline text
  * (guidance + whatever memory exists). Exported for testing and reuse.
- * @param {{ dshHome: string, cwd: string, memoryToolAvailable?: boolean }} paths
- *   resolved locations plus whether the agent memory tool is registered.
+ * @param {{ dshHome: string, cwd: string, memoryToolAvailable?: boolean,
+ *   workspaceRegistry?: object }} paths resolved locations, whether the
+ *   agent memory tool is registered, and the optional workspaceRegistry.
  * @param {ReturnType<typeof resolveConfig>} resolved validated config.
  * @param {AbortSignal} [signal]
  * @returns {Promise<string>} full frame text (guidance-only when no memory exists).
  */
-export async function composeBaselineText({ dshHome, cwd, memoryToolAvailable = false }, resolved, signal) {
+export async function composeBaselineText({ dshHome, cwd, memoryToolAvailable = false, workspaceRegistry }, resolved, signal) {
   signal?.throwIfAborted();
-  const projectRoot = await findProjectRoot(cwd, resolved.projectRootMarkers);
+  const store = await resolveWorkspaceStore({ dshHome, cwd }, resolved, workspaceRegistry, signal);
   const longTerm = await loadIndexSection(globalLongTermDir(dshHome), signal);
   const shortTermRaw = await readTextIfPresent(globalShortTermFile(dshHome), signal);
   const shortTerm = shortTermRaw !== undefined && shortTermRaw.trim() !== '' ? shortTermRaw.trim() : undefined;
-  const workspace = await loadIndexSection(join(projectRoot, ...WORKSPACE_MEMORY_SEGMENTS), signal);
-  const guidance = renderGuidance({ dshHome, projectRoot }, memoryToolAvailable);
+  const workspace = await loadIndexSection(store.dir, signal);
+  const guidance = renderGuidance({ dshHome, workspaceDir: store.dir }, memoryToolAvailable);
   return buildBaselineText({ guidance, longTerm, shortTerm, workspace }, resolved);
 }
 
@@ -642,18 +703,22 @@ async function snapshotLongTerm(dir, signal) {
 }
 
 /**
- * Build the JSON snapshot the Memories panel renders: full short-term note
- * content, long-term and workspace stores as index + file locations only.
- * Read-only; failures inside one scope degrade that scope, never the rest.
+ * Build the JSON snapshot the Memories tab renders: full short-term note
+ * content, the global long-term store as index + file locations, and — when
+ * `workspace.cwd` names the requesting session's working directory — exactly
+ * that session's workspace store (never any other workspace's). Read-only;
+ * failures inside one scope degrade that scope, never the rest.
  *
  * @param {{ dshHome: string }} paths resolved locations.
  * @param {ReturnType<typeof resolveConfig>} resolved validated config.
- * @param {readonly { title: string, path: string }[]} workspaces registered
- *   workspace roots to scan for workspace memory (may be empty).
+ * @param {{ cwd: string, workspaceRegistry?: object } | undefined} workspace
+ *   the requesting session's working directory (and optional registry);
+ *   omit it for a global-only snapshot.
  * @param {AbortSignal} [signal]
- * @returns {Promise<object>} JSON-safe snapshot.
+ * @returns {Promise<object>} JSON-safe snapshot (`workspace` is undefined
+ *   when the session's workspace has no memory store).
  */
-export async function buildMemoriesSnapshot({ dshHome }, resolved, workspaces, signal) {
+export async function buildMemoriesSnapshot({ dshHome }, resolved, workspace, signal) {
   signal?.throwIfAborted();
   const shortTermPath = globalShortTermFile(dshHome);
   const shortTermRaw = await readTextIfPresent(shortTermPath, signal);
@@ -661,24 +726,70 @@ export async function buildMemoriesSnapshot({ dshHome }, resolved, workspaces, s
     ? { present: false, path: shortTermPath, chars: 0, content: '' }
     : { present: true, path: shortTermPath, chars: shortTermRaw.length, content: shortTermRaw };
   const longTerm = await snapshotLongTerm(globalLongTermDir(dshHome), signal);
-  const workspaceSections = [];
-  for (const workspace of workspaces) {
-    const dir = join(workspace.path, ...WORKSPACE_MEMORY_SEGMENTS);
-    const store = await snapshotLongTerm(dir, signal);
-    if (store.present) {
-      workspaceSections.push({ title: workspace.title, root: workspace.path, ...store });
-    }
+  let workspaceSection;
+  if (workspace !== undefined && typeof workspace.cwd === 'string' && workspace.cwd !== '') {
+    const store = await resolveWorkspaceStore(
+      { dshHome, cwd: workspace.cwd },
+      resolved,
+      workspace.workspaceRegistry,
+      signal,
+    );
+    const section = await snapshotLongTerm(store.dir, signal);
+    workspaceSection = section.present ? { root: store.root, name: store.name, ...section } : undefined;
   }
   return {
     kind: 'dsh-memories-snapshot',
-    version: 1,
+    version: 2,
     generatedAt: new Date().toISOString(),
     dshHome,
     shortTermMaxChars: resolved.shortTermMaxChars,
     shortTerm,
     longTerm,
-    workspaces: workspaceSections,
+    workspace: workspaceSection,
   };
+}
+
+/** Memory-detail scopes the file endpoint serves. */
+const DETAIL_SCOPES = new Set(['long', 'workspace']);
+
+/**
+ * Whether a detail request names a safe memory file: a plain `*.md` base
+ * name with no separators, no drive/parent tricks, and not the index.
+ * @param {unknown} name
+ * @returns {boolean}
+ */
+function isSafeMemoryFileName(name) {
+  if (typeof name !== 'string' || name === '') return false;
+  if (name !== INDEX_FILENAME && !name.toLowerCase().endsWith('.md')) return false;
+  return !name.includes('/') && !name.includes('\\') && !name.includes(':')
+    && !RESERVED_PATH_SEGMENTS.has(name)
+    && !WINDOWS_RESERVED_NAMES.has(name.split('.')[0].toLowerCase());
+}
+
+/**
+ * Read one memory file's full content for the Memories detail page.
+ * Read-only and validated; exported for testing.
+ *
+ * @param {{ dshHome: string, cwd: string }} paths resolved locations (cwd is
+ *   the requesting session's working directory; used for `workspace` only).
+ * @param {ReturnType<typeof resolveConfig>} resolved validated config.
+ * @param {{ scope: 'long' | 'workspace', name: string }} request
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ scope: string, name: string, title: string, chars: number, text: string } | undefined>}
+ *   the file's detail, or undefined when the request is invalid or the file
+ *   does not exist.
+ */
+export async function readMemoryFile({ dshHome, cwd, workspaceRegistry }, resolved, { scope, name }, signal) {
+  signal?.throwIfAborted();
+  if (!DETAIL_SCOPES.has(scope) || !isSafeMemoryFileName(name)) return undefined;
+  const dir = scope === 'workspace'
+    ? (await resolveWorkspaceStore({ dshHome, cwd }, resolved, workspaceRegistry, signal)).dir
+    : globalLongTermDir(dshHome);
+  const raw = await readTextIfPresent(join(dir, name), signal);
+  if (raw === undefined) return undefined;
+  const text = raw.slice(0, MAX_SOURCE_CHARS);
+  const { title } = extractTitleAndSummary(text, name.slice(0, -'.md'.length));
+  return { scope, name, title, chars: raw.length, text };
 }
 
 /* --------------------------------------------------------------------------
@@ -779,7 +890,7 @@ const MEMORY_USAGE = [
   'Usage:',
   '  /memory save <text>                 — append a timestamped note to global short-term memory',
   '  /memory long <title> | <text>       — create/update a global long-term memory file and refresh INDEX.md',
-  '  /memory workspace <title> | <text>  — create/update a workspace memory file (.dsh/memories/) and refresh its INDEX.md',
+  '  /memory workspace <title> | <text>  — create/update a workspace memory file ($DSH_HOME/memories/workspace/<workspacename>/) and refresh its INDEX.md',
   '  /memory show                        — preview exactly what a new session would receive',
 ].join('\n');
 
@@ -855,13 +966,14 @@ async function writeLongTermMemory(dir, title, body) {
 /**
  * The /memory command handler body (pure helper; the registered handler wraps
  * it and converts thrown errors into error results).
- * @param {{ dshHome: string, cwd: string }} paths resolved locations.
+ * @param {{ dshHome: string, cwd: string, workspaceRegistry?: object }} paths
+ *   resolved locations plus the optional workspaceRegistry service.
  * @param {ReturnType<typeof resolveConfig>} resolved validated config.
  * @param {string} rawInput
  * @param {AbortSignal} [signal]
  * @returns {Promise<{ kind: 'success', text: string } | { kind: 'error', text: string }>}
  */
-async function runMemoryCommand({ dshHome, cwd }, resolved, rawInput, signal) {
+async function runMemoryCommand({ dshHome, cwd, workspaceRegistry }, resolved, rawInput, signal) {
   const { sub, args } = parseInvocation(rawInput);
   switch (sub) {
     case 'save': {
@@ -885,12 +997,11 @@ async function runMemoryCommand({ dshHome, cwd }, resolved, rawInput, signal) {
       }
       if (sub === 'workspace') {
         signal?.throwIfAborted();
-        const projectRoot = await findProjectRoot(cwd, resolved.projectRootMarkers);
-        const dir = join(projectRoot, ...WORKSPACE_MEMORY_SEGMENTS);
-        const written = await writeLongTermMemory(dir, title, body);
+        const store = await resolveWorkspaceStore({ dshHome, cwd }, resolved, workspaceRegistry, signal);
+        const written = await writeLongTermMemory(store.dir, title, body);
         return {
           kind: 'success',
-          text: `Workspace memory saved: .dsh/${MEMORIES_DIR}/${written.file} ("${title}"); ${written.index} regenerated (new sessions in this workspace see it).`,
+          text: `Workspace memory saved: $DSH_HOME/${MEMORIES_DIR}/${WORKSPACE_MEMORIES_DIRNAME}/${basename(store.dir)}/${written.file} ("${title}") for workspace "${store.name}"; ${written.index} regenerated (new sessions in this workspace see it).`,
         };
       }
       const written = await writeLongTermMemory(globalLongTermDir(dshHome), title, body);
@@ -900,7 +1011,11 @@ async function runMemoryCommand({ dshHome, cwd }, resolved, rawInput, signal) {
       };
     }
     case 'show': {
-      const text = await composeBaselineText({ dshHome, cwd, memoryToolAvailable: true }, resolved, signal);
+      const text = await composeBaselineText(
+        { dshHome, cwd, memoryToolAvailable: true, workspaceRegistry },
+        resolved,
+        signal,
+      );
       return {
         kind: 'success',
         text: `What a NEW session in this workspace would receive:\n\n${text}`,
@@ -917,13 +1032,14 @@ async function runMemoryCommand({ dshHome, cwd }, resolved, rawInput, signal) {
  * `{ ok, message }` result (thrown Errors settle as tool error results).
  * Exported for testing.
  *
- * @param {{ dshHome: string, cwd: string }} paths resolved locations.
+ * @param {{ dshHome: string, cwd: string, workspaceRegistry?: object }} paths
+ *   resolved locations plus the optional workspaceRegistry service.
  * @param {ReturnType<typeof resolveConfig>} resolved validated config.
  * @param {{ action: 'save' | 'long' | 'workspace', title?: string, text: string }} args
  * @param {AbortSignal} [signal]
  * @returns {Promise<{ ok: boolean, message: string }>}
  */
-export async function runMemoryTool({ dshHome, cwd }, resolved, { action, title, text }, signal) {
+export async function runMemoryTool({ dshHome, cwd, workspaceRegistry }, resolved, { action, title, text }, signal) {
   if (typeof text !== 'string' || text.trim() === '') {
     throw new Error('memory tool: "text" must be a non-empty string.');
   }
@@ -940,9 +1056,8 @@ export async function runMemoryTool({ dshHome, cwd }, resolved, { action, title,
     if (trimmedTitle === '') {
       throw new Error(`memory tool: action "${action}" needs a non-empty "title".`);
     }
-    const projectRoot = await findProjectRoot(cwd, resolved.projectRootMarkers);
     const dir = action === 'workspace'
-      ? join(projectRoot, ...WORKSPACE_MEMORY_SEGMENTS)
+      ? (await resolveWorkspaceStore({ dshHome, cwd }, resolved, workspaceRegistry, signal)).dir
       : globalLongTermDir(dshHome);
     const written = await writeLongTermMemory(dir, trimmedTitle, text.trim());
     const where = action === 'workspace'
@@ -958,14 +1073,15 @@ export async function runMemoryTool({ dshHome, cwd }, resolved, { action, title,
  * ToolRuntime.register contract; parameters/output stay inside the enforced
  * JSON Schema subset: type/properties/required/additionalProperties/items/enum).
  *
- * @param {{ dshHome: string }} paths resolved locations.
+ * @param {{ dshHome: string, getWorkspaceRegistry: () => object | undefined }} paths
+ *   resolved locations plus a lazy workspaceRegistry getter.
  * @param {ReturnType<typeof resolveConfig>} resolved validated config.
  * @returns {object} ToolDefinition.
  */
-function memoryToolDefinition({ dshHome }, resolved) {
+function memoryToolDefinition({ dshHome, getWorkspaceRegistry }, resolved) {
   return {
     name: 'memory',
-    description: 'Write to the user\'s personal DSH memories. action "save" appends a timestamped note to the global short-term rolling note (current work, pickup points); "long" creates/updates a global long-term memory file (durable cross-project knowledge about the user); "workspace" does the same in this workspace\'s .dsh/memories/ (repo-local knowledge). Files and indexes are kept consistent automatically.',
+    description: 'Write to the user\'s personal DSH memories. action "save" appends a timestamped note to the global short-term rolling note (current work, pickup points); "long" creates/updates a global long-term memory file (durable cross-project knowledge about the user); "workspace" does the same in this workspace\'s memory directory under $DSH_HOME/memories/workspace/ (workspace-local knowledge). Files and indexes are kept consistent automatically.',
     parameters: {
       type: 'object',
       properties: {
@@ -1000,7 +1116,7 @@ function memoryToolDefinition({ dshHome }, resolved) {
     },
     async execute(args, exec) {
       const cwd = exec?.agent?.session?.header?.cwd ?? process.cwd();
-      return await runMemoryTool({ dshHome, cwd }, resolved, args, exec?.signal);
+      return await runMemoryTool({ dshHome, cwd, workspaceRegistry: getWorkspaceRegistry?.() }, resolved, args, exec?.signal);
     },
   };
 }
@@ -1027,6 +1143,14 @@ export function apply(ctx, config) {
   const dshHome = resolveDshHome(resolved.dshHome);
   /** Flipped while the agent memory tool is registered; the guidance mirrors it. */
   const memoryToolAvailable = { current: false };
+  /** The optional workspaceRegistry, read lazily so a late service still works. */
+  const workspaceRegistry = () => {
+    try {
+      return ctx.get('workspaceRegistry');
+    } catch {
+      return undefined;
+    }
+  };
 
   ctx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
     const decision = await next();
@@ -1037,7 +1161,12 @@ export function apply(ctx, config) {
       signal.throwIfAborted();
       const cwd = agent?.session?.header?.cwd ?? process.cwd();
       const text = await composeBaselineText(
-        { dshHome, cwd, memoryToolAvailable: memoryToolAvailable.current },
+        {
+          dshHome,
+          cwd,
+          memoryToolAvailable: memoryToolAvailable.current,
+          workspaceRegistry: workspaceRegistry(),
+        },
         resolved,
         signal,
       );
@@ -1065,7 +1194,7 @@ export function apply(ctx, config) {
       handler: async ({ agent, rawInput = '', signal }) => {
         try {
           const cwd = agent?.session?.header?.cwd ?? process.cwd();
-          return await runMemoryCommand({ dshHome, cwd }, resolved, rawInput, signal);
+          return await runMemoryCommand({ dshHome, cwd, workspaceRegistry: workspaceRegistry() }, resolved, rawInput, signal);
         } catch (error) {
           if (error?.name === 'AbortError') throw error;
           return {
@@ -1078,7 +1207,7 @@ export function apply(ctx, config) {
   });
 
   const toolsFiber = ctx.inject(['tools'], (toolCtx) => {
-    const dispose = toolCtx.tools.register(memoryToolDefinition({ dshHome }, resolved));
+    const dispose = toolCtx.tools.register(memoryToolDefinition({ dshHome, getWorkspaceRegistry: workspaceRegistry }, resolved));
     memoryToolAvailable.current = true;
     return () => {
       memoryToolAvailable.current = false;
@@ -1087,7 +1216,28 @@ export function apply(ctx, config) {
   });
 
   const webFiber = ctx.inject(['webServer'], (webCtx) => {
-    return webCtx.webServer.register({
+    /** One shared JSON-response helper for both read-only routes. */
+    const sendJson = (res, status, value, head = false) => {
+      res.writeHead(status, {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+      });
+      res.end(head ? undefined : JSON.stringify(value));
+    };
+    /** The requesting tab's session cwd, or undefined when it is not live. */
+    const sessionCwdOf = (sessionId) => {
+      try {
+        const agents = webCtx.get('agents');
+        const cwd = agents?.get?.(sessionId)?.session?.header?.cwd;
+        return typeof cwd === 'string' && cwd !== '' ? cwd : undefined;
+      } catch (error) {
+        ctx.logger.warn('dsh-memories session lookup failed: %o', error);
+        return undefined;
+      }
+    };
+    const readQuery = (req) => new URL(req.url ?? '/', 'http://memories.local').searchParams;
+
+    const disposeSnapshot = webCtx.webServer.register({
       kind: 'exact',
       path: '/memories/snapshot.json',
       handler: async (req, res) => {
@@ -1097,32 +1247,67 @@ export function apply(ctx, config) {
             res.end(JSON.stringify({ error: 'method not allowed' }));
             return;
           }
-          let workspaces = [];
-          try {
-            const registry = webCtx.get('workspaceRegistry');
-            if (registry !== undefined && typeof registry.list === 'function') {
-              const listed = await registry.list();
-              workspaces = listed.map((workspace) => ({ title: workspace.title, path: workspace.path }));
-            }
-          } catch (error) {
-            ctx.logger.warn('dsh-memories snapshot workspace listing failed: %o', error);
+          // The Memories tab passes its session id; the workspace section is
+          // scoped to THAT session's workspace only. Without the parameter
+          // the snapshot stays global-only.
+          const sessionId = readQuery(req).get('session') ?? '';
+          let workspace;
+          let sessionResolved;
+          if (sessionId !== '') {
+            const cwd = sessionCwdOf(sessionId);
+            sessionResolved = cwd !== undefined;
+            if (sessionResolved) workspace = { cwd };
           }
-          const snapshot = await buildMemoriesSnapshot({ dshHome }, resolved, workspaces);
-          const body = JSON.stringify(snapshot);
-          res.writeHead(200, {
-            'content-type': 'application/json; charset=utf-8',
-            'cache-control': 'no-store',
-          });
-          res.end(req.method === 'HEAD' ? undefined : body);
+          const snapshot = {
+            ...(await buildMemoriesSnapshot({ dshHome }, resolved, workspace)),
+            ...(sessionResolved !== undefined ? { sessionResolved } : {}),
+          };
+          sendJson(res, 200, snapshot, req.method === 'HEAD');
         } catch (error) {
           ctx.logger.warn('dsh-memories snapshot failed: %o', error);
-          if (!res.headersSent) {
-            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
-          }
-          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+          if (!res.headersSent) sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+          else res.end();
         }
       },
     });
+
+    const disposeFile = webCtx.webServer.register({
+      kind: 'exact',
+      path: '/memories/file.json',
+      handler: async (req, res) => {
+        try {
+          if (req.method !== 'GET' && req.method !== 'HEAD') {
+            res.writeHead(405, { 'content-type': 'application/json; charset=utf-8', allow: 'GET, HEAD' });
+            res.end(JSON.stringify({ error: 'method not allowed' }));
+            return;
+          }
+          // The Memories detail page: one memory file's full content. The
+          // request is validated (scope enum + safe *.md base name) and
+          // scoped exactly like the snapshot — the workspace scope reads the
+          // requesting session's workspace only.
+          const query = readQuery(req);
+          const scope = query.get('scope') ?? '';
+          const name = query.get('name') ?? '';
+          const sessionId = query.get('session') ?? '';
+          const cwd = sessionCwdOf(sessionId) ?? process.cwd();
+          const detail = await readMemoryFile({ dshHome, cwd, workspaceRegistry: webCtx.get('workspaceRegistry') }, resolved, { scope, name });
+          if (detail === undefined) {
+            sendJson(res, 404, { error: 'memory file not found or request invalid' });
+            return;
+          }
+          sendJson(res, 200, { kind: 'dsh-memories-file', version: 1, ...detail }, req.method === 'HEAD');
+        } catch (error) {
+          ctx.logger.warn('dsh-memories file read failed: %o', error);
+          if (!res.headersSent) sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+          else res.end();
+        }
+      },
+    });
+
+    return () => {
+      disposeSnapshot();
+      disposeFile();
+    };
   });
 
   return () => {

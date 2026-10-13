@@ -1,9 +1,9 @@
 {
   "name": "@local/dsh-memories",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
-  "description": "Personal DSH memory: injects a how-to-use-your-memories guide plus a global long-term index, a global short-term note, and a workspace memory index into every new session; the /memory command and the agent memory tool write and preview memories; the Memories web panel shows short-term content and long-term/workspace indexes.",
+  "description": "Personal DSH memory: injects a how-to-use-your-memories guide plus a global long-term index, a global short-term note, and a workspace memory index into every new session; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab shows short-term content and long-term/workspace indexes for the current session's workspace.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -26,7 +26,7 @@
     "client": {
       "platform": "web",
       "immediately": true,
-      "inject": ["@deepseek-ai/dsh-client-ui-slots"]
+      "inject": ["@deepseek-ai/dsh-client-ui-sidebar-right"]
     }
   }
 }

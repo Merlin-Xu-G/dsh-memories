@@ -5,8 +5,8 @@ with three scopes, injected into every new session together with a
 **how-to-use-your-memories guide**, so memory works **automatically**: the
 agent consults memories before asking the user for information it lacks, and
 writes new memories itself through the **`memory` agent tool**. Humans keep
-the **`/memory`** command, and the **Memories web panel** shows what is
-stored.
+the **`/memory`** command, and the **Memories tab** in the right sidebar
+shows what is stored.
 
 ```
 /memory save finished the migration notes, pickup: verify indexes tomorrow
@@ -21,7 +21,7 @@ stored.
 |---|-------|---------|----------|
 | 1 | **Global long-term** | markdown files under `$DSH_HOME/memories/global-long-term/` (DSH home = `$DSH_HOME` env, default `~/.dsh`) | the directory's `INDEX.md`, into **every** new session, regardless of workspace |
 | 2 | **Global short-term** | one rolling note `$DSH_HOME/memories/global-short-term.md` | the note (newest entries within budget) into **every** new session |
-| 3 | **Workspace** | markdown files under `<projectRoot>/.dsh/memories/` **inside the workspace itself** | that directory's `INDEX.md`, only into sessions whose workspace root matches |
+| 3 | **Workspace** | markdown files under `$DSH_HOME/memories/workspace/<workspacename>/` (one directory per workspace) | that directory's `INDEX.md`, only into sessions whose workspace root matches |
 
 ### Long-term stores and INDEX.md
 
@@ -101,18 +101,36 @@ Rationale for this seam over the alternatives:
 
 ### Workspace memory storage choice
 
-Workspace memory lives **inside the workspace** at `<projectRoot>/.dsh/memories/`
-— not under `$DSH_HOME` — because it should **travel with the repository**
-(like `AGENTS.md`): clone the repo elsewhere, and its memory comes along,
-reviewable and versionable in git if the user chooses to commit it. `.dsh/` is
-the established repo-local DSH namespace (DSH itself scans `<repo>/.dsh/skills`
-for sessions opened inside a repo); no native memory seam exists in the Harness,
-so a plugin-owned directory under `.dsh/` is the closest-to-native choice.
-`projectRoot` is discovered exactly like the shipped AGENTS.md loader: climb
-from the session working directory while the project-root marker (default
-`.git`) is absent; with no marker anywhere, the session directory itself is the
-root. Injection includes the workspace section only when the discovered root
-actually has a `.dsh/memories/` directory with content.
+Workspace memory lives **under the DSH home**, one directory per workspace:
+
+```
+$DSH_HOME/memories/workspace/<workspacename>/
+```
+
+`<workspacename>` is the **registered workspace title** when the session's
+project root resolves to a registered workspace (via the optional
+`workspaceRegistry` service), else the root directory's name. The name is
+slugified (Unicode letters/digits kept, lowercased, hyphen-joined, max 64,
+Windows-reserved-safe; an empty slug falls back to a short stable hash of the
+root path) — so `My Custom WS!` → `my-custom-ws`, and a CJK-titled workspace
+keeps its characters. `projectRoot` is discovered exactly like the shipped
+AGENTS.md loader: climb from the session working directory while the
+project-root marker (default `.git`) is absent; with no marker anywhere, the
+session directory itself is the root. Injection includes the workspace
+section only when that workspace's memory directory actually has content.
+
+Notes and trade-offs of the centralized layout (a deliberate v0.5.0 change,
+replacing the original `<projectRoot>/.dsh/memories/` placement):
+
+- All workspace memories live in one place next to the global scopes —
+  uniform backup/cleanup, and nothing is written inside your repositories.
+- The memory does **not** travel with a cloned repository anymore; renaming
+  a workspace changes its directory name (the old directory stays where it
+  was until you move it).
+- **No automatic migration**: stores written by ≤0.4.x at
+  `<projectRoot>/.dsh/memories/` remain there, ignored; move the `*.md`
+  files into the new directory (or re-save them with `/memory workspace` /
+  the `memory` tool) to carry them over.
 
 ### Budgets and truncation
 
@@ -156,28 +174,60 @@ Two surfaces share one code path (same files, same INDEX.md regeneration):
 - Neither surface is required for injection to work; each injected fiber is
   fail-soft, and a missing service parks the plugin instead of throwing.
 
-## The Memories web panel
+## The Memories tab (right sidebar)
 
 The browser half (`client.js`, exported as `./client`, declared through
-`dsh.client` in `package.json`) adds a **Memories** icon to the sidebar panel
-list and a keyed `main` panel page:
+`dsh.client` in `package.json`) contributes one **page-type tab** to the
+right sidebar, registered with `ctx.sidebarRightTabs` (kind `memories`, with
+a guide entry so it is reachable from the guide page) whose body renders
+under the keyed `sidebar.right.pane.tab` slot. Both of its views scroll
+(`height:100%; overflow-y:auto; overflow-x:hidden`), exactly as wide as the
+sidebar pane (`width:100%` + `min-width:0` on every container, so long paths
+wrap instead of stretching), so long lists and long memories stay readable.
 
-- **Global short-term memory** is rendered in **full** (path, size, newest
-  entries last).
-- **Global long-term** and **workspace** stores render **only the file index**
-  (the INDEX.md text, or the synthesized index) **and file locations** (file
-  name, title/summary, size, directory). File bodies are deliberately not
-  shown.
-- Workspace sections appear per registered workspace that actually has a
-  `.dsh/memories/` directory with content.
+**List view (first page)** — one compact row per memory, no full content
+inline:
 
-Data comes from a read-only JSON snapshot the Host half serves at the exact
-`webServer` route `GET /memories/snapshot.json` (registered inside
-`ctx.inject(['webServer'], …)`; workspace roots come from the optional
-`workspaceRegistry` service). The panel fetches with `cache: 'no-store'` and
-has a Refresh button; styles are component-local and use only
-`--dsw-alias-*` theme tokens, so light and dark themes both render correctly.
-No Harness client package is imported.
+- **Short-term memory** — ONE expandable block, not a detail page: the card
+  header ("Short-term memory · N entries · size", with a ▸/▾ chevron)
+  toggles the whole rolling note inline. No content title.
+- **Global long-term memory** — one row per file (title, first-line summary,
+  name/size).
+- **This workspace** — the workspace store of **the session the tab belongs
+  to — and only that workspace**. The tab body receives its Session id
+  through the slot registration's business share
+  (`inject: (sessionId) => ({ sessionId })`), passes it to the Host as
+  `?session=<id>`, and the Host resolves that session's working directory →
+  project root → that workspace's memory directory under
+  `$DSH_HOME/memories/workspace/`. No other workspace ever appears; when the
+  session's workspace has no memories (or the session cannot be resolved on
+  the Host), the section says so honestly.
+
+**Detail view** — selecting a long-term or workspace row opens the memory's
+**complete markdown content** on a detail page with a back control (the
+short-term note never navigates — it expands in place). Every block is hard
+width-clamped to its parent card (`min-width:0; max-width:100%`), so the UI
+tracks the sidebar pane's width exactly.
+
+Data comes from two read-only JSON endpoints the Host half serves on exact
+`webServer` routes:
+
+- `GET /memories/snapshot.json[?session=<id>]` — the list data (v2 shape:
+  the full short-term note content, long-term/workspace file rows,
+  `sessionResolved` honesty flag).
+- `GET /memories/file.json?scope=long|workspace&name=<file>[&session=<id>]`
+  — one memory file's full content. The request is validated (scope enum;
+  `name` must be a plain `*.md` base name — no separators, drives, or
+  traversal) and bounded by the source-read cap; `workspace` reads the
+  requesting session's workspace only. Unknown or unsafe requests get a 404
+  JSON error.
+
+The tab fetches with `cache: 'no-store'` and has a Refresh button on the
+list view; styles are component-local and use only `--dsw-alias-*` theme
+tokens, so light and dark themes both render correctly. No Harness client
+package is imported. (This list→detail model replaces v1's "index and
+locations only" display rule: detail pages now show full file content by
+explicit user decision.)
 
 ## Install
 
@@ -242,14 +292,20 @@ format.
   render validated, async `execute(args, exec)` returning lossless JSON,
   `exec.agent` + `exec.signal`); `ctx.webServer.register({ kind, path,
   handler(req, res) })` exact/prefix route tables (dsh-host-webserver);
-  `ctx.workspaceRegistry.list()` → `Workspace[]` with `.path`/`.title`;
-  `resolveDshHome` precedence. Client half: `window.__ModuleLoader__.load({
-  id, factory(require) })` with `require('react')` from the platform module
-  table; plugin form `{ inject: ['slots'], apply(ctx) }`;
-  `ctx.slots.inject(key, () => ctx.slots.register(opts, Component))` with
-  list-slot `{ name, id, order, label }` and keyed-slot `{ name, key }`
-  options; component-local styles with `--dsw-alias-*` tokens only; no
-  imports of Harness client packages.
+  `ctx.agents.get(sessionId)` → live Agent with
+  `agent.session.header.cwd` (the snapshot route resolves the requesting
+  tab's session to its workspace); `resolveDshHome` precedence. Client
+  half: `window.__ModuleLoader__.load({ id, factory(require) })` with
+  `require('react')` from the platform module table; plugin form
+  `{ inject: ['slots', 'sidebarRightTabs'], apply(ctx) }`;
+  `ctx.sidebarRightTabs.register({ id, kind, title, guide? })` page-tab
+  types (omitted `priority` = the default `extension` band);
+  `ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
+  { name, key: type id, inject: (sessionId, actions) => props }, Body))`
+  tab bodies whose business share receives the Session id
+  (ui-sidebar-documentpreview is the live proof for all three);
+  component-local styles with `--dsw-alias-*` tokens only; no imports of
+  Harness client packages.
 - **node:fs, not `ctx.fs`**: memory files live under `$DSH_HOME` (outside any
   workspace sandbox) and inside the workspace; direct reads keep injection
   working in sandboxed sessions where provider access outside the workspace
@@ -274,11 +330,14 @@ format.
 - **Identity ignores content**: a visible baseline is kept as long as budgets
   and root markers are unchanged, even if memory files or the registered
   write path changed — same rule as above, applied via resume.
-- **Panel is read-only and English-only**; the snapshot route is unauthenticated
-  exactly like the rest of the web GUI's loopback surface, and the panel does
-  not auto-refresh (Refresh re-fetches with `no-store`). Under an Electron
-  `file://` shell the relative snapshot fetch may not resolve; the panel shows
-  the fetch error rather than guessing.
+- **Tab is read-only and English-only**; the snapshot route is unauthenticated
+  exactly like the rest of the web GUI's loopback surface, and the tab does
+  not auto-refresh (Refresh re-fetches with `no-store`). The workspace
+  section resolves through the live `agents` service, so a session that is
+  no longer live shows the honest "could not resolve this session" note
+  instead of its workspace. Under an Electron `file://` shell the relative
+  snapshot fetch may not resolve; the tab shows the fetch error rather than
+  guessing.
 - **Single-line command input**: `/memory long`/`workspace` bodies are one
   composer line (the first `|` separates title and body); the agent tool has
   no such limit. For long-form human input, edit the generated `.md` directly.
@@ -289,7 +348,7 @@ format.
 package.json        manifest: @local/dsh-memories, dsh.bundle.patch + dsh.client
 cordis.patch.yml    insert row `memories`
 index.js            Host plugin: Config schema + baseline injector + /memory command + memory tool + snapshot route
-client.js           Client plugin: Memories sidebar panel page
+client.js           Client plugin: Memories right-sidebar tab (session-scoped)
 locale/en.json      display metadata (English)
 locale/zh.json      display metadata (Chinese)
 README.md           this file
