@@ -1,16 +1,18 @@
 {
   "name": "@local/dsh-memories",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
-  "description": "Personal DSH memory: injects a global long-term index, a global short-term note, and a workspace memory index into every new session; the /memory command writes and previews memories.",
+  "description": "Personal DSH memory: injects a how-to-use-your-memories guide plus a global long-term index, a global short-term note, and a workspace memory index into every new session; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab shows short-term content and long-term/workspace indexes for the current session's workspace.",
   "exports": {
     ".": "./index.js",
+    "./client": "./client.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "index.js",
+    "client.js",
     "cordis.patch.yml",
     "locale/*.json",
     "README.md",
@@ -20,6 +22,11 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-sidebar-right"]
     }
   }
 }

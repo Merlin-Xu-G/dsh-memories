@@ -1,4 +1,5 @@
-# dsh-memories bundle patch: one Host plugin row.
+# dsh-memories bundle patch: one Host plugin row (the browser half ships as
+# the package's ./client export and needs no Loader row of its own).
 #
 # Every config key is optional; safe defaults: 8192-char injection budget
 # per scope, 16384-char short-term file retention, ['.git'] project-root
