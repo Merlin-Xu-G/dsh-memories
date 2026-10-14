@@ -347,8 +347,19 @@ format.
 ```
 package.json        manifest: @local/dsh-memories, dsh.bundle.patch + dsh.client
 cordis.patch.yml    insert row `memories`
-index.js            Host plugin: Config schema + baseline injector + /memory command + memory tool + snapshot route
-client.js           Client plugin: Memories right-sidebar tab (session-scoped)
+index.js            Host plugin entry: composition root (wiring + public re-exports)
+lib/                Host modules:
+  lib/config.js       config validation + Standard-Schema `Config`
+  lib/paths.js        DSH-home precedence, project-root climb, workspace store resolution
+  lib/fs.js           tiny fail-open filesystem helpers
+  lib/store.js        on-disk memory model (index/files) + writers
+  lib/baseline.js     guidance + baseline text + durable baseline message
+  lib/surfaces.js     /memory command + agent memory tool
+  lib/snapshot.js     read-only JSON payloads for the Memories tab
+  lib/routes.js       the two read-only webServer routes
+client.js           Client plugin: Memories right-sidebar tab (session-scoped); one
+                    module by loader constraint (the module system serves a single
+                    bundle per package; package-local chunks are async-only)
 locale/en.json      display metadata (English)
 locale/zh.json      display metadata (Chinese)
 README.md           this file
