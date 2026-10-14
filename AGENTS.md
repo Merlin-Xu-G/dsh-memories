@@ -29,8 +29,17 @@ section covers only the workspace of the session the tab belongs to.
 ```
 package.json        manifest (@local/dsh-memories, dsh.bundle.patch + dsh.client)
 cordis.patch.yml    loader patch: insert row id `memories`
-index.js            Host plugin (Config schema, baseline injector, /memory command, memory tool, snapshot + file-detail routes)
-client.js           Client plugin (Memories right-sidebar tab, session-scoped; ./client export)
+index.js            Host plugin entry (composition root: wiring + public re-exports)
+lib/                Host modules:
+  lib/config.js       config validation + Standard-Schema `Config`
+  lib/paths.js        DSH-home precedence, project-root climb, workspace store resolution
+  lib/fs.js           tiny fail-open filesystem helpers
+  lib/store.js        on-disk memory model (index/files) + writers
+  lib/baseline.js     guidance + baseline text + durable baseline message
+  lib/surfaces.js     /memory command + agent memory tool
+  lib/snapshot.js     read-only JSON payloads for the Memories tab
+  lib/routes.js       the two read-only webServer routes
+client.js           Client plugin (Memories right-sidebar tab, session-scoped; ./client export — one module by loader constraint)
 locale/en.json      Plugin Manager display metadata (English)
 locale/zh.json      Plugin Manager display metadata (Chinese)
 README.md           full design + usage documentation
@@ -55,10 +64,13 @@ README.md           full design + usage documentation
   runtime: configured `dshHome` → non-blank `$DSH_HOME` env → `~/.dsh` (blank
   env counts as unset). Never write into `$DSH_HOME` from build/verification
   steps — tests use a temporary home under a scratch directory.
-- **Dependencies**: none. `index.js` imports `node:*` builtins only; `client.js`
-  uses `window.__ModuleLoader__.load` + `require('react')` from the platform
-  module table and imports no Harness client package. Keep both that way
-  (local bundles must not rely on packages installed beside them).
+- **Dependencies**: none. `index.js` and `lib/*.js` import `node:*` builtins
+  and `./lib/*` relative modules only; `client.js` is one module using
+  `window.__ModuleLoader__.load` + `require('react')` from the platform
+  module table (the loader serves a single bundle per package; package-local
+  chunks are async-only, so the browser half stays one file) and imports no
+  Harness client package. Keep all of them that way (local bundles must not
+  rely on packages installed beside them).
 - **Client half rules**: register UI only through `ctx.slots.inject(...)`
   and `ctx.sidebarRightTabs.register(...)` (right-sidebar tab types; guide
   entries need numeric `order` and FUNCTION `title`/`description` — strings

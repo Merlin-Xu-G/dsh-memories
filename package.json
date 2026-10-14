@@ -1,9 +1,9 @@
 {
   "name": "@local/dsh-memories",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
-  "description": "Personal DSH memory: injects a how-to-use-your-memories guide plus a global long-term index, a global short-term note, and a workspace memory index into every new session; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab shows short-term content and long-term/workspace indexes for the current session's workspace.",
+  "description": "Personal DSH memory: injects a how-to-use-your-memories guide plus a global long-term index, a global short-term note, and a workspace memory index into every new session; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab lists all memories and shows each one's full content on a detail page, scoped to the current session's workspace.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -13,6 +13,7 @@
   "files": [
     "index.js",
     "client.js",
+    "lib/*.js",
     "cordis.patch.yml",
     "locale/*.json",
     "README.md",
