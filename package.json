@@ -20,6 +20,9 @@
     "AGENTS.md",
     ".factory.yml"
   ],
+  "engines": {
+    "dsh": ">=0.2.0-rc.2"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -28,6 +31,7 @@
       "platform": "web",
       "immediately": true,
       "inject": ["@deepseek-ai/dsh-client-ui-sidebar-right"]
-    }
+    },
+    "latestTestedDshVersion": "0.2.1-rc.2"
   }
 }
