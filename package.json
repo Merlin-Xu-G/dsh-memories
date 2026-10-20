@@ -3,6 +3,9 @@
   "version": "0.5.1",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
   "description": "Personal DSH memory: injects a how-to-use-your-memories guide plus a global long-term index, a global short-term note, and a workspace memory index into every new session; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab lists all memories and shows each one's full content on a detail page, scoped to the current session's workspace.",
   "exports": {
     ".": "./index.js",
