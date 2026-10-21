@@ -24,7 +24,7 @@ test('Config validates an empty config to the documented defaults', () => {
   assert.deepEqual(resolved, {
     dshHome: undefined,
     longTermMaxChars: 8192,
-    shortTermMaxChars: 8192,
+    shortTermMaxChars: 10000,
     workspaceMaxChars: 8192,
     shortTermFileMaxChars: 16384,
     projectRootMarkers: ['.git'],

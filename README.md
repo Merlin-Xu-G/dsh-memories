@@ -48,11 +48,16 @@ files — so a large memory library costs the session only its index.
 ### Global short-term memory
 
 "What DSH is working on right now": `/memory save <text>` and the tool's
-`save` action append `- [<ISO-8601 UTC timestamp>] <text>` to
+`save` action append `- [<YYYY-MM-DD>] <text>` (local date only — the time of
+day belongs in the entry text, and only when it matters) to
 `$DSH_HOME/memories/global-short-term.md`. The file is bounded (default 16384
 chars): when a write would exceed the bound, the **oldest** entries are
 dropped first (the newest entry is always kept). The injection is capped to
-the short-term budget with an honest truncation marker.
+the short-term budget; when a save pushes the note past that cap, the write
+result directs the agent to **compact** it: the tool's `compact` action
+rewrites the note with an LLM-authored version — newest entries verbatim,
+older ones folded into one dated summary entry — validated to be strictly
+shorter than what was there and within the file bound.
 
 ## Automatic memory use (the injected guide)
 
@@ -144,7 +149,7 @@ All budgets are in characters and configurable (see below). Defaults:
 | Config | Default | Meaning |
 |---|---|---|
 | `longTermMaxChars` | `8192` | cap for the injected global long-term index |
-| `shortTermMaxChars` | `8192` | cap for the injected global short-term note (≈ 2k tokens) |
+| `shortTermMaxChars` | `10000` | cap for the injected global short-term note (≈ 2.5k tokens) |
 | `workspaceMaxChars` | `8192` | cap for the injected workspace index |
 | `shortTermFileMaxChars` | `16384` | retention bound for the short-term *file* (oldest entries drop first) |
 
@@ -153,7 +158,7 @@ When a memory section exceeds its budget it is truncated (never splitting a
 surrogate pair) and ends with an honest marker:
 
 ```
-[memory truncated: showing 8192 of 14503 characters to fit the configured budget]
+[memory truncated: showing 10000 of 14503 characters to fit the configured budget]
 ```
 
 ## Writing memories: `/memory` command and `memory` tool
@@ -163,6 +168,7 @@ Two surfaces share one code path (same files, same INDEX.md regeneration):
 | Action | `/memory` (human) | `memory` tool (agent) |
 |---|---|---|
 | short-term note | `/memory save <text>` | `{ action: 'save', text }` |
+| compact the short-term note | — | `{ action: 'compact', text }` |
 | global long-term file | `/memory long <title> \| <text>` | `{ action: 'long', title, text }` |
 | workspace file | `/memory workspace <title> \| <text>` | `{ action: 'workspace', title, text }` |
 | preview baseline | `/memory show` | — (read the injected baseline / memory files) |
@@ -258,7 +264,7 @@ All keys are optional (row `memories` in the bundle patch):
   config:
     dshHome: '~/.dsh'          # explicit DSH home override (highest precedence)
     longTermMaxChars: 8192
-    shortTermMaxChars: 8192
+    shortTermMaxChars: 10000
     workspaceMaxChars: 8192
     shortTermFileMaxChars: 16384
     projectRootMarkers: ['.git']

@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** The oversized short-term note the truncation checks overwrite with. */
-export const OVERSIZED_SHORT_TERM = `- [2026-10-11T10:00:00.000Z] ${'x'.repeat(9000)}\n`;
+export const OVERSIZED_SHORT_TERM = `- [2026-10-11T10:00:00.000Z] ${'x'.repeat(11000)}\n`;
 
 /**
  * Build the scratch tree described above.
