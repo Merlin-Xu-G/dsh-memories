@@ -20,6 +20,7 @@ the **Memories tab** in the right sidebar shows what is stored.
 
 - Minimum DSH: `>=0.2.0-rc.2` — declared in `package.json` → `engines.dsh`. DSH enforces this floor at install/activation and matches prerelease versions, so it never blocks a newer DSH.
 - Latest tested DSH: `0.2.1-rc.2` — recorded in `package.json` → `dsh.latestTestedDshVersion`. Descriptive only; DSH does not enforce it.
+- **0.9.0 prompt change**: the INDEX.md boilerplate is gone — every index is composed fresh in memory at session start (no index file is read or written, `scripts/generate-index.mjs` is removed, and a stray `INDEX.md` in a store is treated like any other `.md`); the injected guidance was trimmed ~30% with every standing rule kept, and the Memories-tab snapshot dropped its unused index-document fields (v4). Prompt/snapshot-only: no config keys and no mechanics changed.
 - **0.8.1 prompt change**: the injected guidance now drives **automatic long-term/workspace capture** — the user never curates memories, so the agent writes durable memories itself, unprompted (user corrections and preferences immediately, repeated discussions/decisions, wrap-up durable facts), routed project-specific → `workspace` and cross-project → `long`, de-duplicated against the injected index, with `save` rebalanced to transient pickup notes. Prompt-only: no config keys and no mechanics changed.
 - **0.8.0 config change**: the long-term and workspace **injection caps are removed** — `longTermMaxChars` and `workspaceMaxChars` are gone (indexes are injected whole); configs that still set either fail at activation as unknown keys, the same honest-break pattern as every removed key before it.
 - **0.7.0 config change**: `shortTermMemoriesCap` (default 10000) is the write-time cap for the short-term note; `shortTermMaxChars` (the 0.6.x name) is a deprecated alias (setting both is an error).
@@ -32,13 +33,14 @@ the **Memories tab** in the right sidebar shows what is stored.
 | 2 | **Global short-term** | one rolling note `$DSH_HOME/memories/global-short-term.md` | the **whole note** (injected in full — the cap lives in the write path, not here) into **every** new session |
 | 3 | **Workspace** | markdown files under `$DSH_HOME/memories/workspace/<workspacename>/` (one directory per workspace) | that directory's name+description index, **whole**, only into sessions whose workspace root matches |
 
-### Long-term stores, the Description convention, and INDEX.md
+### Long-term stores and the Description convention
 
-Each long-term store (global and workspace) is a directory of `*.md` files
-plus an `INDEX.md`. **The index is what gets injected** — never the
-individual files — so a large memory library costs the session only its
-index. Since 0.8.0 there are **no injection caps**: the index is injected
-whole, however large it grows.
+Each long-term store (global and workspace) is a directory of `*.md` files.
+**The index is what gets injected** — never the individual files — so a
+large memory library costs the session only its index. The index is
+composed fresh in memory at every session start and never stored on disk;
+since 0.8.0 there are **no injection caps**: it is injected whole, however
+large it grows.
 
 - Every memory file carries an explicit **`Description: <one line>`** line
   right after its `# Title` heading (blank line in between is fine). The
@@ -55,50 +57,19 @@ whole, however large it grows.
   disk and in the Memories tab; they just never appear in an index.
 - A description is **one line of at most 1000 characters**. The write
   surfaces (`/memory` and the `memory` tool) **reject** longer or
-  multi-line descriptions outright; the generation script and the
-  read-only synthesis instead **truncate** an over-long description in the
-  index to 1000 characters with an honest `…` ellipsis — the file itself is
-  never touched.
-- **The plugin NEVER writes `INDEX.md`.** The only writer is the repo
-  script `scripts/generate-index.mjs` (see below), and it regenerates
-  **only the index of the workspace you run it in** — the global long-term
-  store has no generated file by design. When `INDEX.md` exists, the
-  plugin injects it **as-is** (hand-editable, though the script overwrites
-  hand edits on the next run). When it is absent, the plugin
-  **synthesizes** the exact same document read-only in memory at injection
-  time — nothing is written to disk, and freshly written memories are
-  visible to new sessions either way: **the automatic memory is the core
-  feature and needs no `INDEX.md` at all**.
+  multi-line descriptions outright; the read-only composition instead
+  **truncates** an over-long description in the index to 1000 characters
+  with an honest `…` ellipsis — the file itself is never touched.
+- **There is no `INDEX.md` anymore.** The plugin never reads or writes any
+  index file: it composes the index fresh in memory from the files at
+  every session start, so freshly written memories appear in new sessions
+  with nothing to regenerate. A stray `INDEX.md` dropped into a store is
+  treated like any other `.md`: it shows in the Memories tab and is
+  indexed only if it carries its own `Description:` line (old generated
+  ones are dead weight now — delete them).
 - `/memory long`, `/memory workspace`, and the tool's `long`/`workspace`
   actions write **only the memory file**. They neither touch nor mention
-  the index; regenerating `INDEX.md` is always an explicit `node
-  scripts/generate-index.mjs` (run from inside the workspace) away.
-
-### scripts/generate-index.mjs (the only INDEX.md writer)
-
-```
-node scripts/generate-index.mjs [--home <path>]
-```
-
-A dependency-free Node script (`node:*` builtins + the plugin's own `lib/`
-modules only) and deliberately parameter-free: it processes **only the
-memories of the workspace you run it in**. The workspace is derived from
-the current directory exactly the way the plugin derives a session's
-workspace: climb to the project root (default marker `.git`), take the
-root directory's name, slugify it (registered workspace titles live in a
-Host service the script cannot see — it uses the directory name, the
-plugin's no-registry fallback), then regenerate that store's `INDEX.md`
-when it has memory files, reporting what it did. There is no `--check`
-mode and no scoping parameter; `--home` still overrides the DSH home
-(`--home` ?? non-blank `$DSH_HOME` ?? `~/.dsh`, the plugin's rule). Run it
-from wherever your project is — the absolute path to the script works from
-any workspace. The **global long-term** store has no generator by design:
-keep it file-free and let every session compose its index read-only (a
-stale global `INDEX.md` would be injected stale forever — delete it if one
-exists). Entries are sorted by file name and clamped to the 1000-char
-description ceiling. A `generate-index` entry in `package.json` →
-`scripts` aliases it (`npm run generate-index` runs in the checkout's own
-workspace).
+  the index.
 
 ### Global short-term memory
 
@@ -178,8 +149,8 @@ Harness (`agent/pre-step` waterfall event) and its extracted built source:
 
 1. At the **first eligible `agent/pre-step`** of a session, the plugin composes
    one baseline text from the guidance plus the three scopes (the long-term
-   and workspace indexes injected **whole** — no budgets, no truncation
-   markers; the short-term note injected in full).
+   and workspace indexes composed fresh in memory and injected **whole** —
+   no budgets, no truncation markers; the short-term note injected in full).
 2. The text is wrapped in a plugin-owned `<system-reminder>` frame (literal
    `</system-reminder>` inside memory content is escaped, so memory text can
    never close the frame) and becomes one durable **user-role message** with a
@@ -244,9 +215,8 @@ Only one cap remains, and it is a **write-path** cap:
 
 Plus the fixed (non-configurable) **1000-character ceiling for memory
 descriptions**, enforced on every surface: write surfaces reject longer or
-multi-line descriptions; the generation script and the read-only synthesis
-truncate longer ones in the index with an honest `…` ellipsis and leave the
-file untouched.
+multi-line descriptions; the read-only composition truncates longer ones
+in the index with an honest `…` ellipsis and leaves the file untouched.
 
 `shortTermMaxChars` (the 0.6.x name) is accepted as a **deprecated alias**
 of `shortTermMemoriesCap`; setting both is an activation error. The 0.7.x
@@ -276,8 +246,8 @@ Two surfaces share one code path (same files, same validation):
 - In the command, the **first two `|`** separate title and description; any
   further `|` belongs to the text. The description may be left empty
   (`/memory long Title | | text`).
-- Both surfaces write **only the memory file** — never `INDEX.md`, and the
-  result message deliberately says nothing about the index.
+- Both surfaces write **only the memory file**, and the result message
+  deliberately says nothing about the index.
 - The command is registered via `ctx.commands.register` inside
   `ctx.inject(['commands'], …)` (human-only by the dsh-commands contract).
 - The tool is registered via `ctx.tools.register` inside
@@ -329,10 +299,10 @@ tracks the sidebar pane's width exactly.
 Data comes from two read-only JSON endpoints the Host half serves on exact
 `webServer` routes:
 
-- `GET /memories/snapshot.json[?session=<id>]` — the list data (v3 shape:
+- `GET /memories/snapshot.json[?session=<id>]` — the list data (v4 shape:
   the full short-term note content, long-term/workspace file rows with
-  title + description, the full index document, `sessionResolved` honesty
-  flag).
+  title + description, `sessionResolved` honesty flag; the v3
+  index-document fields are gone).
 - `GET /memories/file.json?scope=long|workspace&name=<file>[&session=<id>]`
   — one memory file's full content. The request is validated (scope enum;
   `name` must be a plain `*.md` base name — no separators, drives, or
@@ -420,12 +390,10 @@ overrides pointing at the verification steps. See the factory README's
   (ui-sidebar-documentpreview is the live proof for all three);
   component-local styles with `--dsw-alias-*` tokens only; no imports of
   Harness client packages.
-- **One index composer, two consumers**: `lib/store.js` exports
-  `composeIndexDocument` — the single place the index document exists.
-  `scripts/generate-index.mjs` writes it to `INDEX.md`; the injection
-  fallback composes the identical document in memory. The script imports
-  the plugin's own `lib/` modules, so the on-disk artifact and the
-  synthesized text can never drift apart.
+- **One index composer**: `lib/store.js` exports `composeIndexLines` —
+  the single place the index exists. It composes the entry lines fresh in
+  memory; nothing anywhere reads or writes an index file, so there is no
+  on-disk artifact that could ever drift from the injected text.
 - **node:fs, not `ctx.fs`**: memory files live under `$DSH_HOME` (outside any
   workspace sandbox) and inside the workspace; direct reads keep injection
   working in sandboxed sessions where provider access outside the workspace
@@ -448,11 +416,11 @@ overrides pointing at the verification steps. See the factory README's
   so an ever-growing memory library grows the baseline without bound too —
   the guide's de-duplication rule (update the existing file, never
   near-duplicate) and one-line descriptions are what keep the library lean.
-- **A stale INDEX.md is injected stale**: when `INDEX.md` exists, the plugin
-  injects it as-is; writes never update it. The script refreshes only the
-  workspace it is run in, so the global store should simply stay file-free —
-  delete a stale global INDEX.md rather than keeping it (or delete any
-  INDEX.md and let every session compose the index fresh from the files).
+- **No `INDEX.md` anymore (0.9.0)**: indexes are composed fresh from the
+  files at every session start, so a stale index is structurally
+  impossible. Old generated `INDEX.md` files under `$DSH_HOME/memories`
+  are dead weight (each is just a description-less `.md` row in the
+  Memories tab) — delete them.
 - **Baseline-only refresh**: memories are read once per session (first
   eligible pre-step). Edits made mid-session (including via `/memory save` or
   the tool) appear in **new** sessions; the running session keeps its injected
@@ -492,8 +460,6 @@ lib/                Host modules:
   lib/surfaces.js     /memory command + agent memory tool
   lib/snapshot.js     read-only JSON payloads for the Memories tab
   lib/routes.js       the two read-only webServer routes
-scripts/
-  scripts/generate-index.mjs  the only INDEX.md writer (regenerates the current workspace's store)
 client.js           Client plugin: Memories right-sidebar tab (session-scoped); one
                     module by loader constraint (the module system serves a single
                     bundle per package; package-local chunks are async-only)
