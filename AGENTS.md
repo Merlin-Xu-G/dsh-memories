@@ -21,8 +21,9 @@ after its `# Title` heading; index entries are
 `- Title (file-name.md) — description`, and files without a Description line
 are simply not listed. The plugin **never writes `INDEX.md`**: it injects the
 file when present and otherwise composes the identical document read-only in
-memory; `scripts/generate-index.mjs` (dependency-free, same DSH-home
-precedence) is the only index writer. Injection happens as one durable
+memory; `scripts/generate-index.mjs` (run inside a workspace, it regenerates
+that workspace's INDEX.md — the only index writer; dependency-free, same
+DSH-home precedence). Injection happens as one durable
 user-role baseline message spliced at the first eligible `agent/pre-step` —
 the same seam the shipped `@deepseek-ai/dsh-agent-instructions` uses for
 AGENTS.md loading. The baseline **always** carries a "your memory system"
@@ -53,7 +54,7 @@ lib/                Host modules:
   lib/surfaces.js     /memory command + agent memory tool
   lib/snapshot.js     read-only JSON payloads for the Memories tab
   lib/routes.js       the two read-only webServer routes
-scripts/generate-index.mjs  the only INDEX.md writer (regenerates every store)
+scripts/generate-index.mjs  the only INDEX.md writer (regenerates the current workspace's store)
 client.js           Client plugin (Memories right-sidebar tab, session-scoped; ./client export — one module by loader constraint)
 locale/en.json      Plugin Manager display metadata (English)
 locale/zh.json      Plugin Manager display metadata (Chinese)
@@ -88,9 +89,12 @@ README.md           full design + usage documentation
   authorized exception is an explicit user-requested conversion of the live
   memory stores).
 - **The plugin never writes `INDEX.md`**: only `scripts/generate-index.mjs`
-  does. Code changes must keep the on-disk artifact and the read-only
-  injection synthesis byte-identical — both come from
-  `composeIndexDocument` in `lib/store.js`; do not fork that logic.
+  does — run inside a workspace, it writes only that workspace's store (the
+  workspace is derived from the cwd exactly like a session's workspace; the
+  global long-term store has no generated file by design). Code changes must
+  keep the on-disk artifact and the read-only injection synthesis
+  byte-identical — both come from `composeIndexDocument` in `lib/store.js`;
+  do not fork that logic.
 - **Dependencies**: none. `index.js` and `lib/*.js` import `node:*` builtins
   and `./lib/*` relative modules only; `scripts/generate-index.mjs` imports
   `node:*` builtins and `../lib/*` only; `client.js` is one module using

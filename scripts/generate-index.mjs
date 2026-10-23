@@ -1,34 +1,46 @@
 #!/usr/bin/env node
 /**
- * dsh-memories — regenerate every memory `INDEX.md`.
+ * dsh-memories — regenerate the CURRENT workspace's memory INDEX.md.
  *
  * The ONLY writer of INDEX.md: the plugin itself never writes it (it injects
  * the file when present and otherwise composes the exact same document
- * read-only at session start). Dependency-free — `node:*` builtins and the
- * plugin's own `lib/` modules only.
+ * read-only at session start — the automatic memory needs no INDEX.md at
+ * all). Dependency-free — `node:*` builtins and the plugin's own `lib/`
+ * modules only.
  *
  *   node scripts/generate-index.mjs [--home <path>]
  *
- * DSH home precedence (the same rule the plugin uses): `--home`, then a
- * non-blank `$DSH_HOME`, then `~/.dsh`. Regenerates
- * `$DSH_HOME/memories/global-long-term/INDEX.md` and `INDEX.md` for every
- * `$DSH_HOME/memories/workspace/<store>/` that has memory files. Only files
- * with a `Description:` line right after the `# Title` heading are listed;
- * over-long descriptions (1000+ chars) are honestly truncated in the index
- * (the file itself is never touched). No `--check` mode, no per-store
- * scoping — run it and every index is rewritten.
+ * Deliberately parameter-free: the command processes ONLY the memories of
+ * the workspace it is run in — commands are assists; the automatic
+ * injection is the core feature. The workspace is derived from the current
+ * working directory exactly like the plugin derives a session's workspace:
+ * climb to the project root (default marker `.git`), take the root
+ * directory's name, slugify it (registered workspace titles live in a Host
+ * service the script cannot see — it uses the directory name, the plugin's
+ * no-registry fallback), then regenerate that store's
+ * `$DSH_HOME/memories/workspace/<slug>/INDEX.md` when it has memory files.
+ * The global long-term store has no generator by design — keep it
+ * file-free and let every session compose its index read-only. Files
+ * without a `Description:` line right after the `# Title` heading are not
+ * listed; over-long descriptions (1000+ chars) are honestly truncated in
+ * the index (the file itself is never touched). No `--check` mode, no
+ * scoping parameter.
  */
 
-import { readdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import {
-  GLOBAL_LONG_TERM_DIRNAME,
   MEMORIES_DIR,
   WORKSPACE_MEMORIES_DIRNAME,
+  findProjectRoot,
   resolveDshHome,
+  workspaceSlug,
 } from '../lib/paths.js';
 import { isDirectory } from '../lib/fs.js';
 import { INDEX_FILENAME, composeIndexDocument } from '../lib/store.js';
+
+/** Default project-root markers (the same default the plugin config uses). */
+const PROJECT_ROOT_MARKERS = ['.git'];
 
 /**
  * Parse `--home <path>` / `--home=<path>`; anything else is a usage error.
@@ -54,51 +66,26 @@ function parseHomeFlag(argv) {
   return home;
 }
 
-/**
- * Regenerate one store's INDEX.md, or report why there is nothing to do.
- * @param {string} label store label for the log line.
- * @param {string} dir store directory.
- */
-async function regenerateStore(label, dir) {
+async function main() {
+  const home = resolveDshHome(parseHomeFlag(process.argv.slice(2)));
+  const root = await findProjectRoot(process.cwd(), PROJECT_ROOT_MARKERS);
+  const name = basename(root);
+  const slug = workspaceSlug(name, root);
+  const dir = join(home, MEMORIES_DIR, WORKSPACE_MEMORIES_DIRNAME, slug);
+  console.log(`[dsh-memories] DSH home: ${home}`);
+  console.log(`[dsh-memories] current workspace: "${name}" (root ${root})`);
   if (!(await isDirectory(dir))) {
-    console.log(`[dsh-memories] ${label}: directory missing — skipped`);
+    console.log(`[dsh-memories] memories/workspace/${slug}: no store yet — nothing to do`);
     return;
   }
   const document = await composeIndexDocument(dir);
   if (document === undefined) {
-    console.log(`[dsh-memories] ${label}: no memory files — skipped`);
+    console.log(`[dsh-memories] memories/workspace/${slug}: no memory files — nothing written`);
     return;
   }
   await writeFile(join(dir, INDEX_FILENAME), `${document}\n`, 'utf8');
   const entries = (document.match(/^- /gm) ?? []).length;
-  console.log(`[dsh-memories] ${label}: ${entries} entr${entries === 1 ? 'y' : 'ies'} -> ${INDEX_FILENAME}`);
-}
-
-async function main() {
-  const home = resolveDshHome(parseHomeFlag(process.argv.slice(2)));
-  const memoriesDir = join(home, MEMORIES_DIR);
-  console.log(`[dsh-memories] DSH home: ${home}`);
-  if (!(await isDirectory(memoriesDir))) {
-    console.log('[dsh-memories] no memories directory under this home — nothing to do');
-    return;
-  }
-  await regenerateStore(
-    `${MEMORIES_DIR}/${GLOBAL_LONG_TERM_DIRNAME}`,
-    join(memoriesDir, GLOBAL_LONG_TERM_DIRNAME),
-  );
-  const workspaceRoot = join(memoriesDir, WORKSPACE_MEMORIES_DIRNAME);
-  if (await isDirectory(workspaceRoot)) {
-    const stores = (await readdir(workspaceRoot, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
-    for (const store of stores) {
-      await regenerateStore(
-        `${MEMORIES_DIR}/${WORKSPACE_MEMORIES_DIRNAME}/${store}`,
-        join(workspaceRoot, store),
-      );
-    }
-  }
+  console.log(`[dsh-memories] memories/workspace/${slug}: ${entries} entr${entries === 1 ? 'y' : 'ies'} -> ${INDEX_FILENAME}`);
 }
 
 main().catch((error) => {
