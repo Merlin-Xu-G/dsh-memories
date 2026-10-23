@@ -1,7 +1,8 @@
 // Baseline composition tests — module load, exports, config validation,
 // project-root climb, render sanity, plus baseline sections: full frame,
 // no-tool fallback, empty store, whole-index injection (no caps since
-// 0.8.0), the Description convention, and the read-only index synthesis.
+// 0.8.0), the Description convention, the read-only index synthesis, and
+// the locked 0.8.1 automatic-capture acceptance rules.
 // Runs against a runtime-generated temp DSH home.
 
 import { after, test } from 'node:test';
@@ -134,6 +135,37 @@ test('empty store: guidance-only baseline (automatic memory from day one)', asyn
     && !empty.includes('## Global short-term memory')
     && !empty.includes('## Workspace memory'),
   );
+});
+
+test('guidance acceptance: the automatic-capture rules are all present (locked)', async () => {
+  // The 0.8.1 prompt rewrite's six acceptance rules, locked as permanent
+  // regression strings against an empty temp home (guidance-only baseline).
+  // Whitespace is normalized first: the locked strings span the guidance's
+  // hard-wrapped lines, and the wrapping must not weaken the lock.
+  const empty = await mod.composeBaselineText(
+    { dshHome: fx.emptyHome, cwd: fx.emptyHome, memoryToolAvailable: true },
+    resolved,
+  );
+  const flat = empty.replaceAll(/\s+/g, ' ');
+  assert.ok(flat.includes('The user never curates memories'),
+    'rule 1: the user never curates memories');
+  assert.ok(
+    flat.includes('whenever the user corrects you, states a style, rule, or preference, or overrides a default, capture it immediately'),
+    'rule 2: the correction-capture trigger');
+  assert.ok(flat.includes('when the same topic or design question comes up a second time'),
+    'rule 3: the repeated-discussions trigger');
+  assert.ok(flat.includes('before you declare the work done'),
+    'rule 4: the wrap-up trigger');
+  assert.ok(
+    flat.includes('and design decisions → `workspace`')
+      && flat.includes('machine/environment facts, general tool knowledge → `long`'),
+    'rule 5: the scope-routing rule names both destinations');
+  assert.ok(
+    flat.includes('update that file (keep its title and file name)')
+      && flat.includes('instead of creating a near-duplicate')
+      && flat.includes('One topic per file'),
+    'rule 6: the de-duplication rule');
+  assert.ok(flat.includes('unprompted'), 'capture is the agent\'s own unprompted job');
 });
 
 test('an existing INDEX.md is injected as-is and marked as file-sourced', async () => {

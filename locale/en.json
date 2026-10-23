@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DSH Memories",
-    "description": "Personal memory for DSH: every new session starts with a how-to-use-your-memories guide plus a global long-term index, a global short-term note, and a workspace memory index, each injected whole and composed read-only from memory files carrying a one-line Description; scripts/generate-index.mjs regenerates the current workspace's INDEX.md on demand and the plugin never writes it; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab lists all memories and shows each one's full content on a detail page, scoped to the current session's workspace."
+    "description": "Personal memory for DSH: every new session starts with a memory guide that drives the agent to capture memories itself, unprompted — user corrections and preferences, repeated topics and decisions, wrap-up durable facts — routed to the right scope (project-specific → workspace, cross-project → long) and de-duplicated against the injected index; a global long-term index, a global short-term note, and a workspace memory index are each injected whole, composed read-only from memory files carrying a one-line Description; scripts/generate-index.mjs regenerates the current workspace's INDEX.md on demand and the plugin never writes it; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab lists all memories and shows each one's full content on a detail page, scoped to the current session's workspace."
   }
 }

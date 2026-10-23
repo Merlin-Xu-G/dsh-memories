@@ -27,9 +27,15 @@ DSH-home precedence). Injection happens as one durable
 user-role baseline message spliced at the first eligible `agent/pre-step` —
 the same seam the shipped `@deepseek-ai/dsh-agent-instructions` uses for
 AGENTS.md loading. The baseline **always** carries a "your memory system"
-guidance section (three scopes, when to write,
-check-memory-before-asking-the-user), so memory works automatically even with
-an empty store. Writing goes through three surfaces sharing one code path:
+guidance section — three scopes, check-memory-before-asking-the-user, and
+since 0.8.1 the automatic-capture rules: the user never curates memories, so
+the agent itself writes durable memories unprompted, as things arise during
+the session (user corrections and preferences immediately, repeated
+discussions/decisions, wrap-up durable facts), routed project-specific →
+workspace and cross-project → long, de-duplicated against the injected index
+(update the existing file rather than near-duplicate), with `save` reserved
+for transient pickup notes and a brief inline mention on durable writes — so
+memory works automatically even with an empty store. Writing goes through three surfaces sharing one code path:
 the `/memory` human command (save | long | workspace | show; long and
 workspace take `<title> | <description> | <text>`), the agent `memory` tool
 (`ctx.tools.register`, optional `description` argument), and the read-only
