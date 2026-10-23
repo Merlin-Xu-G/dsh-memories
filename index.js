@@ -5,16 +5,16 @@
  *
  * 1. GLOBAL LONG-TERM — markdown files under `$DSH_HOME/memories/global-long-term/`;
  *    each file carries a `Description:` line right after its `# Title`
- *    heading, and the store's name+description index (its `INDEX.md`) is
- *    what gets injected — whole, with no cap.
+ *    heading, and the store's name+description index — composed fresh in
+ *    memory at session start — is what gets injected, whole, with no cap.
  * 2. GLOBAL SHORT-TERM — one rolling note `$DSH_HOME/memories/global-short-term.md`
  *    ("what DSH is working on right now"), injected in full.
  * 3. WORKSPACE — the same long-term mechanism scoped to the current workspace,
  *    stored centrally under `$DSH_HOME/memories/workspace/<workspacename>/`.
  *
- * The plugin NEVER writes `INDEX.md`: it reads the file when present and
- * otherwise composes the same document read-only at injection time; the repo
- * script `scripts/generate-index.mjs` is the only index writer.
+ * There is NO on-disk index: the plugin never reads or writes any index
+ * file — every index is composed read-only from the memory files whenever a
+ * baseline is built.
  *
  * This module is only the composition root: it validates config, registers
  * the `agent/pre-step` baseline injector, and starts the three optional
