@@ -44,10 +44,15 @@ test('no machine-specific path literals in tracked files', () => {
       .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
       .map((entry) => `lib/${entry.name}`)
     : [];
+  const scriptFiles = existsSync(join(repo, 'scripts'))
+    ? readdirSync(join(repo, 'scripts'), { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.(js|mjs|cjs)$/.test(entry.name))
+      .map((entry) => `scripts/${entry.name}`)
+    : [];
   const testFiles = readdirSync(join(repo, 'test'), { withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.(js|mjs|cjs)$/.test(entry.name))
     .map((entry) => `test/${entry.name}`);
-  const files = [...rootFiles, ...libFiles, ...testFiles];
+  const files = [...rootFiles, ...libFiles, ...scriptFiles, ...testFiles];
   const forbidden = [process.env.USERNAME, repo, process.env.DSH_PROFILE_DIR]
     .filter((value) => typeof value === 'string' && value.trim() !== '');
   assert.ok(forbidden.length > 0, 'scan needs at least the user name and repo root as needles');

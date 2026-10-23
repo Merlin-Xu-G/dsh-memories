@@ -1,12 +1,13 @@
-// Memory-tool write tests — smoke section 6 of the scratch smoke
-// (.tmp/smoke-v2.mjs): the agent memory tool writes through the same store
-// as every other surface (temp home only), regenerates INDEX.md, and its
-// writes are visible to the next snapshot.
+// Memory-tool write tests — the agent memory tool writes through the same
+// store as every other surface (temp home only). Since 0.8.0 a long/workspace
+// write saves ONLY the memory file (INDEX.md is the generation script's),
+// descriptions are validated (≤1000 chars, one line), and an update without
+// a description keeps the file's existing Description line.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { readFile, writeFile } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import * as mod from '../index.js';
 import { buildFixture } from './helpers.mjs';
 
@@ -24,27 +25,78 @@ test('tool save appends to the short-term note', async () => {
   assert.ok(saved.ok === true && saved.message.includes('short-term'));
 });
 
-test('tool long writes a global file and regenerates INDEX.md', async () => {
+test('tool long writes a global file with a Description line and NO INDEX.md', async () => {
   const wroteLong = await mod.runMemoryTool(
     { dshHome: fx.home, cwd: fx.nested },
     resolved,
-    { action: 'long', title: 'Tool long memory', text: 'Written by the tool smoke.' },
+    { action: 'long', title: 'Tool long memory', description: 'One-line description of the tool-written memory.', text: 'Written by the tool smoke.' },
   );
   assert.ok(wroteLong.ok === true && wroteLong.message.includes('tool-long-memory.md'));
-  const regeneratedIndex = await readFile(
-    join(fx.home, 'memories', 'global-long-term', 'INDEX.md'),
-    'utf8',
+  assert.ok(!wroteLong.message.includes('INDEX'), 'the write result stays silent about the index');
+  const file = await readFile(join(fx.home, 'memories', 'global-long-term', 'tool-long-memory.md'), 'utf8');
+  assert.ok(file.startsWith('# Tool long memory\n\nDescription: One-line description of the tool-written memory.\n\n'));
+  await assert.rejects(access(join(fx.home, 'memories', 'global-long-term', 'INDEX.md')),
+    'a write must never create INDEX.md');
+});
+
+test('tool long without a description writes no Description line', async () => {
+  await mod.runMemoryTool(
+    { dshHome: fx.home, cwd: fx.nested },
+    resolved,
+    { action: 'long', title: 'Tool bare memory', text: 'No description given.' },
   );
-  assert.ok(regeneratedIndex.includes('Tool long memory'));
+  const file = await readFile(join(fx.home, 'memories', 'global-long-term', 'tool-bare-memory.md'), 'utf8');
+  assert.ok(file.startsWith('# Tool bare memory\n\nNo description given.'));
+  assert.ok(!file.includes('Description:'));
+});
+
+test('tool long update without a description keeps the existing Description line', async () => {
+  await mod.runMemoryTool(
+    { dshHome: fx.home, cwd: fx.nested },
+    resolved,
+    { action: 'long', title: 'Keep description', description: 'The description that must survive.', text: 'First body.' },
+  );
+  await mod.runMemoryTool(
+    { dshHome: fx.home, cwd: fx.nested },
+    resolved,
+    { action: 'long', title: 'Keep description', text: 'Second body, no description argument.' },
+  );
+  const file = await readFile(join(fx.home, 'memories', 'global-long-term', 'keep-description.md'), 'utf8');
+  assert.ok(file.includes('Description: The description that must survive.'));
+  assert.ok(file.includes('Second body, no description argument.'));
+});
+
+test('tool rejects a description over 1000 chars', async () => {
+  await assert.rejects(
+    mod.runMemoryTool(
+      { dshHome: fx.home, cwd: fx.nested },
+      resolved,
+      { action: 'long', title: 'Too long', description: 'd'.repeat(1001), text: 'x' },
+    ),
+    (error) => error.message.includes('at most 1000 characters'),
+  );
+});
+
+test('tool rejects a multi-line description', async () => {
+  await assert.rejects(
+    mod.runMemoryTool(
+      { dshHome: fx.home, cwd: fx.nested },
+      resolved,
+      { action: 'long', title: 'Multi line', description: 'line one\nline two', text: 'x' },
+    ),
+    (error) => error.message.includes('single line'),
+  );
 });
 
 test('tool workspace writes into the session workspace store', async () => {
   const wroteWs = await mod.runMemoryTool(
     { dshHome: fx.home, cwd: fx.nested },
     resolved,
-    { action: 'workspace', title: 'Tool ws memory', text: 'Written by the tool smoke.' },
+    { action: 'workspace', title: 'Tool ws memory', description: 'Workspace memory from the tool.', text: 'Written by the tool smoke.' },
   );
   assert.ok(wroteWs.ok === true && wroteWs.message.includes(join(fx.home, 'memories', 'workspace', 'ws')));
+  await assert.rejects(access(join(fx.home, 'memories', 'workspace', 'ws', 'INDEX.md')),
+    'a workspace write must never create INDEX.md either');
 });
 
 test('tool rejects a long/workspace write without a title', async () => {

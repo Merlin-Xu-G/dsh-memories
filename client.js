@@ -11,7 +11,7 @@
  * Two views, both scrolling vertically only and as wide as the sidebar pane:
  * - LIST: one compact row per memory — the short-term note as ONE whole-file
  *   item, plus global long-term files and the session's workspace files
- *   (title + summary). No full content is shown inline.
+ *   (title + description). No full content is shown inline.
  * - DETAIL: the selected item's full content — the whole short-term note
  *   (already in the snapshot), or a long-term/workspace file fetched from
  *   the Host half's `/memories/file.json` route (validated scope + safe
@@ -268,7 +268,7 @@ window.__ModuleLoader__.load({
                   rows: longRows.map((file) => ({
                     key: file.name,
                     title: file.title,
-                    text: file.summary,
+                    text: file.description,
                     meta: `${file.name} · ${file.chars} chars`,
                   })),
                   onSelect: (name) => setDetail({ kind: 'file', scope: 'long', name }),
@@ -281,7 +281,7 @@ window.__ModuleLoader__.load({
                   rows: wsRows.map((file) => ({
                     key: file.name,
                     title: file.title,
-                    text: file.summary,
+                    text: file.description,
                     meta: `${file.name} · ${file.chars} chars`,
                   })),
                   onSelect: (name) => setDetail({ kind: 'file', scope: 'workspace', name }),
