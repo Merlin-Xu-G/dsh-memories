@@ -1,13 +1,13 @@
 {
   "name": "@local/dsh-memories",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
     "generate-index": "node scripts/generate-index.mjs"
   },
-  "description": "Personal DSH memory: injects a how-to-use-your-memories guide plus a global long-term index, a global short-term note, and a workspace memory index into every new session, whole and uncapped, composed read-only from memory files carrying a one-line Description; scripts/generate-index.mjs regenerates the current workspace's INDEX.md on demand — the plugin never writes it; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab lists all memories and shows each one's full content on a detail page, scoped to the current session's workspace.",
+  "description": "Personal DSH memory: every new session is injected with a how-to-use-your-memories guide that drives the agent to write memories itself, unprompted — user corrections and preferences, repeated topics and decisions, wrap-up durable facts — routed project-specific → workspace and cross-project → long, de-duplicated against the injected index; a global long-term index, a global short-term note, and a workspace memory index are injected whole and uncapped, composed read-only from memory files carrying a one-line Description; scripts/generate-index.mjs regenerates the current workspace's INDEX.md on demand — the plugin never writes it; the /memory command and the agent memory tool write and preview memories; the Memories right-sidebar tab lists all memories and shows each one's full content on a detail page, scoped to the current session's workspace.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

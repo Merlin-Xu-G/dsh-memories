@@ -2,11 +2,12 @@
 
 A DSH (DeepSeek Harness) plugin bundle that gives DSH a **personal memory**
 with three scopes, injected into every new session together with a
-**how-to-use-your-memories guide**, so memory works **automatically**: the
-agent consults memories before asking the user for information it lacks, and
-writes new memories itself through the **`memory` agent tool**. Humans keep
-the **`/memory`** command, and the **Memories tab** in the right sidebar
-shows what is stored.
+**how-to-use-your-memories guide** that makes capture **automatic**: the user
+never curates memories — the agent consults memories before asking the user
+for information it lacks, and writes memories itself, unprompted, through the
+**`memory` agent tool**, the moment the user corrects it, a topic comes back,
+or the work reveals durable facts. Humans keep the **`/memory`** command, and
+the **Memories tab** in the right sidebar shows what is stored.
 
 ```
 /memory save finished the migration notes, pickup: verify indexes tomorrow
@@ -19,6 +20,7 @@ shows what is stored.
 
 - Minimum DSH: `>=0.2.0-rc.2` — declared in `package.json` → `engines.dsh`. DSH enforces this floor at install/activation and matches prerelease versions, so it never blocks a newer DSH.
 - Latest tested DSH: `0.2.1-rc.2` — recorded in `package.json` → `dsh.latestTestedDshVersion`. Descriptive only; DSH does not enforce it.
+- **0.8.1 prompt change**: the injected guidance now drives **automatic long-term/workspace capture** — the user never curates memories, so the agent writes durable memories itself, unprompted (user corrections and preferences immediately, repeated discussions/decisions, wrap-up durable facts), routed project-specific → `workspace` and cross-project → `long`, de-duplicated against the injected index, with `save` rebalanced to transient pickup notes. Prompt-only: no config keys and no mechanics changed.
 - **0.8.0 config change**: the long-term and workspace **injection caps are removed** — `longTermMaxChars` and `workspaceMaxChars` are gone (indexes are injected whole); configs that still set either fail at activation as unknown keys, the same honest-break pattern as every removed key before it.
 - **0.7.0 config change**: `shortTermMemoriesCap` (default 10000) is the write-time cap for the short-term note; `shortTermMaxChars` (the 0.6.x name) is a deprecated alias (setting both is an error).
 
@@ -105,7 +107,9 @@ workspace).
 of day belongs in the entry text, and only when it matters) to
 `$DSH_HOME/memories/global-short-term.md`. The note is injected **in full**
 into every new session: no character calculation, no truncation marker, no
-ceiling — not even for a pathologically large hand-edited file.
+ceiling — not even for a pathologically large hand-edited file. It is the
+home of **transient pickup notes** ("where work stands"); durable knowledge
+belongs in a long/workspace memory file, and the injected guide says so.
 
 The cap lives entirely in the write path: `shortTermMemoriesCap` (default
 10000 chars). A save is a **pure append** — entries are never dropped or
@@ -122,7 +126,9 @@ grows without bound.
 ## Automatic memory use (the injected guide)
 
 Every new session's baseline **always** begins with a guidance section — even
-when no memories exist yet — that tells the model:
+when no memories exist yet — and since 0.8.1 that guide makes capture the
+agent's own job: **the user never curates memories and will not run the
+memory command for the agent.** The guide tells the model:
 
 - what the three scopes are, what each is for, and exactly where the files
   live (resolved absolute paths for this session);
@@ -132,11 +138,33 @@ when no memories exist yet — that tells the model:
 - **check memory before asking**: consult the injected indexes, read the named
   files with its file tools for details, and only ask the user when memory
   does not answer the question;
-- **write memory when it learns something durable**, and which scope fits:
-  cross-project facts about the user → `long`; "where work stands / pickup
-  notes" → `save`; repo-local knowledge → `workspace`;
-- keep entries concise and factual, never store secrets, and prefer `save`
-  when unsure (it ages out).
+- **write memories itself, unprompted, without asking permission, as things
+  arise during the session** — not only at the end — driven by three
+  triggers:
+  - **user corrections and preferences** (highest priority): the moment the
+    user corrects the agent, states a style/rule/preference, or overrides a
+    default, it is captured immediately as a memory file;
+  - **repeated discussions and decisions**: a topic or design question coming
+    up a second time, or a discussion settling a decision with rationale,
+    writes or updates a topic file so the next session starts from it
+    instead of re-deriving;
+  - **wrap-up knowledge**: durable facts the work revealed (how this project
+    builds/tests/works, environment facts, tool contracts) are written before
+    the work is declared done;
+- **which scope**, with corrections routed the same way: knowledge specific
+  to this project (conventions, commands, layout, design decisions) →
+  `workspace`; knowledge that crosses projects (the user's workflow
+  preferences, machine/environment facts, general tool knowledge) → `long`;
+  transient "where work stands / pickup notes" → `save`;
+- **de-duplication**: before writing, the model checks the injected index —
+  when a file already covers the topic it updates that file (keeping its
+  title and file name) instead of creating a near-duplicate; one topic per
+  file, focused and concise, always with a one-line description;
+- `save` is for **transient pickup notes only** — durable knowledge goes into
+  the durable file NOW, not into the rolling note to age out; only genuine
+  uncertainty defaults to `save`;
+- keep entries concise and factual, never store secrets, and mention durable
+  writes briefly in the reply ("saved this preference to long-term memory").
 
 The guide's write path mirrors what is actually registered: when the
 `tools` service is available the guide points at the `memory` tool; otherwise
@@ -418,7 +446,8 @@ overrides pointing at the verification steps. See the factory README's
   session's injected baseline — grows without bound. Since 0.8.0 the same
   holds for the long-term and workspace indexes: they are injected whole,
   so an ever-growing memory library grows the baseline without bound too —
-  keep the library curated and descriptions one-line.
+  the guide's de-duplication rule (update the existing file, never
+  near-duplicate) and one-line descriptions are what keep the library lean.
 - **A stale INDEX.md is injected stale**: when `INDEX.md` exists, the plugin
   injects it as-is; writes never update it. The script refreshes only the
   workspace it is run in, so the global store should simply stay file-free —
