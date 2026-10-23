@@ -2,10 +2,13 @@
 # the package's ./client export and needs no Loader row of its own).
 #
 # Every config key is optional; safe defaults: 8192-char injection budget
-# per scope, 16384-char short-term file retention, ['.git'] project-root
-# markers, DSH home from $DSH_HOME (or ~/.dsh). Override this row by id in
-# a later patch layer (profile cordis.patch.yml); a matching override
-# replaces `config` wholesale, so restate every field you need.
+# for the long-term and workspace indexes, a 10000-char short-term cap
+# (shortTermMemoriesCap) enforced only at write time — an over-cap save
+# directs the agent to compact; the note itself is always injected in full —
+# ['.git'] project-root markers, DSH home from $DSH_HOME (or ~/.dsh).
+# Override this row by id in a later patch layer (profile cordis.patch.yml);
+# a matching override replaces `config` wholesale, so restate every field
+# you need.
 - insert:
     - id: memories
       name: '@local/dsh-memories'

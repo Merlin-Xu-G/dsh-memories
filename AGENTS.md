@@ -6,15 +6,20 @@
 (`@local/dsh-memories`) providing a personal memory mechanism with three
 scopes: **global long-term** (file library + injected `INDEX.md` under
 `$DSH_HOME/memories/global-long-term/`), **global short-term** (rolling note
-`$DSH_HOME/memories/global-short-term.md`), and **workspace** (the same
+`$DSH_HOME/memories/global-short-term.md` — injected **in full** into every
+new session; its `shortTermMemoriesCap` applies in the write path only, where
+an over-cap save prompts LLM-driven compaction with no mechanical backstop),
+and **workspace** (the same
 long-term mechanism scoped to the current workspace, stored centrally at
 `$DSH_HOME/memories/workspace/<workspacename>/` — the registered workspace
 title when resolvable, else the root directory's name — injected only for
 sessions in that workspace). Injection happens as one durable user-role
 baseline message
 spliced at the first eligible `agent/pre-step` — the same seam the shipped
-`@deepseek-ai/dsh-agent-instructions` uses for AGENTS.md loading — bounded by
-per-scope char budgets with honest truncation markers. The baseline **always**
+`@deepseek-ai/dsh-agent-instructions` uses for AGENTS.md loading — with the
+long-term and workspace indexes bounded by
+per-scope char budgets (honest truncation markers) and the short-term note
+never truncated. The baseline **always**
 carries a "your memory system" guidance section (three scopes, when to write,
 check-memory-before-asking-the-user), so memory works automatically even with
 an empty store. Writing goes through three surfaces sharing one code path:

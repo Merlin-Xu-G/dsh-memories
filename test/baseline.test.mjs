@@ -24,21 +24,30 @@ test('Config validates an empty config to the documented defaults', () => {
   assert.deepEqual(resolved, {
     dshHome: undefined,
     longTermMaxChars: 8192,
-    shortTermMaxChars: 10000,
+    shortTermMemoriesCap: 10000,
     workspaceMaxChars: 8192,
-    shortTermFileMaxChars: 16384,
     projectRootMarkers: ['.git'],
   });
   const explicit = mod.Config['~standard'].validate({
     longTermMaxChars: 8192,
-    shortTermMaxChars: 8192,
+    shortTermMemoriesCap: 10000,
     workspaceMaxChars: 8192,
-    shortTermFileMaxChars: 16384,
     projectRootMarkers: ['.git'],
   });
   assert.equal(explicit.issues, undefined);
   assert.ok(Array.isArray(mod.Config['~standard'].validate({ longTermMaxChars: 0 }).issues));
   assert.ok(Array.isArray(mod.Config['~standard'].validate({ nope: 1 }).issues));
+});
+
+test('Config: shortTermMaxChars is a deprecated alias; removed/both-set keys fail', () => {
+  assert.equal(mod.resolveConfig({ shortTermMaxChars: 512 }).shortTermMemoriesCap, 512);
+  assert.equal(mod.resolveConfig({ shortTermMemoriesCap: 2048 }).shortTermMemoriesCap, 2048);
+  assert.ok(Array.isArray(mod.Config['~standard'].validate({
+    shortTermMemoriesCap: 1,
+    shortTermMaxChars: 2,
+  }).issues), 'setting both the cap and its alias is an error');
+  assert.ok(Array.isArray(mod.Config['~standard'].validate({ shortTermFileMaxChars: 4096 }).issues),
+    'the removed 0.6.x key shortTermFileMaxChars now fails as unknown');
 });
 
 test('module loads and re-exports its public API', () => {
@@ -122,13 +131,15 @@ test('empty store: guidance-only baseline (automatic memory from day one)', asyn
   );
 });
 
-test('oversized short-term note truncates with an honest marker', async () => {
+test('oversized short-term note is injected in full, with no truncation marker', async () => {
   await writeFile(join(fx.home, 'memories', 'global-short-term.md'), OVERSIZED_SHORT_TERM);
-  const truncated = await mod.composeBaselineText(
+  const whole = await mod.composeBaselineText(
     { dshHome: fx.home, cwd: fx.nested, memoryToolAvailable: true },
     resolved,
   );
-  assert.ok(truncated.includes('[memory truncated: showing'));
+  assert.ok(!whole.includes('[memory truncated'), 'no truncation marker may appear');
+  assert.ok(whole.includes('injected in full, never truncated'), 'the section says so honestly');
+  assert.ok(whole.includes(OVERSIZED_SHORT_TERM.trim()), 'the entire note body is present, tail (newest) included');
 });
 
 test('buildBaselineText renders sections from preloaded scope payloads', () => {

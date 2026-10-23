@@ -13,9 +13,9 @@ import { OVERSIZED_SHORT_TERM, buildFixture } from './helpers.mjs';
 const fx = await buildFixture();
 after(() => fx.dispose());
 
-// The smoke's truncation step rewrote the short-term note before its snapshot
-// was taken; replicate that state so the content assertions carry the same
-// meaning (full content served regardless of the injection budget).
+// The oversized short-term note exercises the "full content served — and
+// injected in full" guarantee (there is no truncation step anymore; the cap
+// lives only in the write path as a compaction prompt).
 await writeFile(join(fx.home, 'memories', 'global-short-term.md'), OVERSIZED_SHORT_TERM);
 
 const resolved = mod.Config['~standard'].validate({}).value;
@@ -23,6 +23,7 @@ const resolved = mod.Config['~standard'].validate({}).value;
 test('snapshot: kind/version and the full short-term note', async () => {
   const snapshot = await mod.buildMemoriesSnapshot({ dshHome: fx.home }, resolved, { cwd: fx.nested });
   assert.ok(snapshot.kind === 'dsh-memories-snapshot' && snapshot.version === 2);
+  assert.equal(snapshot.shortTermMemoriesCap, 10000);
   assert.equal(snapshot.shortTerm.present, true);
   assert.equal(snapshot.shortTerm.content.length, snapshot.shortTerm.chars);
   assert.ok(snapshot.shortTerm.content.startsWith('- [2026-10-11T10:00:00.000Z]'));

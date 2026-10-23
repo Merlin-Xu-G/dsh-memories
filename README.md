@@ -19,13 +19,14 @@ shows what is stored.
 
 - Minimum DSH: `>=0.2.0-rc.2` — declared in `package.json` → `engines.dsh`. DSH enforces this floor at install/activation and matches prerelease versions, so it never blocks a newer DSH.
 - Latest tested DSH: `0.2.1-rc.2` — recorded in `package.json` → `dsh.latestTestedDshVersion`. Descriptive only; DSH does not enforce it.
+- **0.7.0 config change**: `shortTermFileMaxChars` is removed (setting it now fails at activation as an unknown key) and `shortTermMaxChars` is a deprecated alias of the new `shortTermMemoriesCap` (default 10000; setting both is an error).
 
 ## The three scopes
 
 | # | Scope | Storage | Injected |
 |---|-------|---------|----------|
 | 1 | **Global long-term** | markdown files under `$DSH_HOME/memories/global-long-term/` (DSH home = `$DSH_HOME` env, default `~/.dsh`) | the directory's `INDEX.md`, into **every** new session, regardless of workspace |
-| 2 | **Global short-term** | one rolling note `$DSH_HOME/memories/global-short-term.md` | the note (newest entries within budget) into **every** new session |
+| 2 | **Global short-term** | one rolling note `$DSH_HOME/memories/global-short-term.md` | the **whole note** (injected in full — the cap lives in the write path, not here) into **every** new session |
 | 3 | **Workspace** | markdown files under `$DSH_HOME/memories/workspace/<workspacename>/` (one directory per workspace) | that directory's `INDEX.md`, only into sessions whose workspace root matches |
 
 ### Long-term stores and INDEX.md
@@ -50,14 +51,21 @@ files — so a large memory library costs the session only its index.
 "What DSH is working on right now": `/memory save <text>` and the tool's
 `save` action append `- [<YYYY-MM-DD>] <text>` (local date only — the time of
 day belongs in the entry text, and only when it matters) to
-`$DSH_HOME/memories/global-short-term.md`. The file is bounded (default 16384
-chars): when a write would exceed the bound, the **oldest** entries are
-dropped first (the newest entry is always kept). The injection is capped to
-the short-term budget; when a save pushes the note past that cap, the write
+`$DSH_HOME/memories/global-short-term.md`. The note is injected **in full**
+into every new session: no character calculation, no truncation marker, no
+ceiling — not even for a pathologically large hand-edited file.
+
+The cap lives entirely in the write path: `shortTermMemoriesCap` (default
+10000 chars). A save is a **pure append** — entries are never dropped or
+rejected mechanically. When a save leaves the note over the cap, the write
 result directs the agent to **compact** it: the tool's `compact` action
-rewrites the note with an LLM-authored version — newest entries verbatim,
-older ones folded into one dated summary entry — validated to be strictly
-shorter than what was there and within the file bound.
+rewrites the note with an LLM-authored version — the agent decides entry by
+entry which entries stay verbatim, which fold into dated summary entries,
+and which finished threads drop, judging each entry's usefulness from its
+text and dates — validated to be strictly shorter than what was there. There
+is deliberately **no mechanical backstop**: if agents repeatedly ignore the
+compaction prompt, the note (and therefore every new session's baseline)
+grows without bound.
 
 ## Automatic memory use (the injected guide)
 
@@ -86,8 +94,9 @@ the mechanism behind DSH's AGENTS.md loading — verified against the installed
 Harness (`agent/pre-step` waterfall event) and its extracted built source:
 
 1. At the **first eligible `agent/pre-step`** of a session, the plugin composes
-   one baseline text from the guidance plus the three scopes (each bounded by
-   its own budget).
+   one baseline text from the guidance plus the three scopes (the long-term
+   and workspace indexes each bounded by its own budget; the short-term note
+   injected in full).
 2. The text is wrapped in a plugin-owned `<system-reminder>` frame (literal
    `</system-reminder>` inside memory content is escaped, so memory text can
    never close the frame) and becomes one durable **user-role message** with a
@@ -142,20 +151,25 @@ replacing the original `<projectRoot>/.dsh/memories/` placement):
   files into the new directory (or re-save them with `/memory workspace` /
   the `memory` tool) to carry them over.
 
-### Budgets and truncation
+### Budgets, caps, and truncation
 
-All budgets are in characters and configurable (see below). Defaults:
+The long-term and workspace **injection budgets** are in characters and
+configurable (see below). Defaults:
 
 | Config | Default | Meaning |
 |---|---|---|
 | `longTermMaxChars` | `8192` | cap for the injected global long-term index |
-| `shortTermMaxChars` | `10000` | cap for the injected global short-term note (≈ 2.5k tokens) |
+| `shortTermMemoriesCap` | `10000` | write-time cap: an over-cap save prompts LLM compaction (no injection cap — the note is injected whole) |
 | `workspaceMaxChars` | `8192` | cap for the injected workspace index |
-| `shortTermFileMaxChars` | `16384` | retention bound for the short-term *file* (oldest entries drop first) |
+
+`shortTermMaxChars` (the 0.6.x name) is accepted as a **deprecated alias** of
+`shortTermMemoriesCap`; setting both is an activation error. The 0.6.x key
+`shortTermFileMaxChars` is **removed** — configs that still set it fail at
+activation as unknown keys (no silent behavior change).
 
 The guidance section is plugin-owned constant text and is not budget-capped.
-When a memory section exceeds its budget it is truncated (never splitting a
-surrogate pair) and ends with an honest marker:
+When a long-term or workspace index section exceeds its budget it is
+truncated (never splitting a surrogate pair) and ends with an honest marker:
 
 ```
 [memory truncated: showing 10000 of 14503 characters to fit the configured budget]
@@ -262,11 +276,10 @@ All keys are optional (row `memories` in the bundle patch):
 - id: memories
   name: '@local/dsh-memories'
   config:
-    dshHome: '~/.dsh'          # explicit DSH home override (highest precedence)
+    dshHome: '~/.dsh'            # explicit DSH home override (highest precedence)
     longTermMaxChars: 8192
-    shortTermMaxChars: 10000
+    shortTermMemoriesCap: 10000  # write-time cap (over-cap saves prompt compaction)
     workspaceMaxChars: 8192
-    shortTermFileMaxChars: 16384
     projectRootMarkers: ['.git']
 ```
 
@@ -329,8 +342,12 @@ format.
 - **Locale**: `locale/en.json` + `locale/zh.json` carry the Plugin Manager
   title/description. Panel strings are English-only in v1 (see limitations).
 
-## Limitations (v2)
+## Limitations (v3)
 
+- **No mechanical bound on the short-term note**: the cap prompts LLM
+  compaction only; nothing is ever dropped or rejected automatically. If
+  agents repeatedly ignore the prompt, the note — and with it every new
+  session's injected baseline — grows without bound.
 - **Baseline-only refresh**: memories are read once per session (first
   eligible pre-step). Edits made mid-session (including via `/memory save` or
   the tool) appear in **new** sessions; the running session keeps its injected

@@ -71,16 +71,33 @@ test('save stamps the local date, not a full timestamp', async () => {
   assert.match(note, /- \[\d{4}-\d{2}-\d{2}\] date stamp probe\n/);
 });
 
-test('save over the cap returns a compact directive', async () => {
-  const tiny = mod.resolveConfig({ shortTermMaxChars: 60, shortTermFileMaxChars: 4096 });
+test('save over the cap returns a compact directive and drops nothing', async () => {
+  const tiny = mod.resolveConfig({ shortTermMemoriesCap: 60 });
   const over = await mod.runMemoryTool(
     { dshHome: fx.home, cwd: fx.nested },
     tiny,
     { action: 'save', text: 'this entry alone pushes the note past the tiny sixty character cap' },
   );
   assert.equal(over.ok, true);
-  assert.ok(over.message.includes('over the 60-char injection cap'));
+  assert.ok(over.message.includes('over the 60-char cap'));
   assert.ok(over.message.includes('action "compact"'));
+  const note = await readFile(join(fx.home, 'memories', 'global-short-term.md'), 'utf8');
+  assert.ok(note.includes('tool smoke note'), 'older entries survive — no mechanical drop');
+  assert.match(note.trim().split(/\r?\n/).at(-1), /tiny sixty character cap$/);
+});
+
+test('save never trims, however large the note already is', async () => {
+  const noteFile = join(fx.home, 'memories', 'global-short-term.md');
+  await writeFile(noteFile, `- [2026-10-01] ancient line padded ${'o'.repeat(12000)}\n`);
+  const saved = await mod.runMemoryTool(
+    { dshHome: fx.home, cwd: fx.nested },
+    resolved,
+    { action: 'save', text: 'newest line after a huge note' },
+  );
+  assert.equal(saved.ok, true);
+  const note = await readFile(noteFile, 'utf8');
+  assert.ok(note.includes('ancient line padded'), 'the huge existing note is untouched');
+  assert.ok(note.trim().endsWith('newest line after a huge note'), 'the new entry is appended');
 });
 
 test('compact rewrites the note shorter and normalizes the trailing newline', async () => {
