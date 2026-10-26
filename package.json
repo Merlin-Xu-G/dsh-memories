@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-memories",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -26,7 +26,7 @@
     ".factory.yml"
   ],
   "engines": {
-    "dsh": ">=0.2.0-rc.2"
+    "dsh": ">=0.2.1-rc.3"
   },
   "dsh": {
     "bundle": {
@@ -37,6 +37,6 @@
       "immediately": true,
       "inject": ["@deepseek-ai/dsh-client-ui-sidebar-right"]
     },
-    "latestTestedDshVersion": "0.2.1-rc.2"
+    "latestTestedDshVersion": "0.2.1-rc.3"
   }
 }
