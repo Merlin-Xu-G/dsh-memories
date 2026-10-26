@@ -1,6 +1,6 @@
 // Memory-tool write tests — the agent memory tool writes through the same
-// store as every other surface (temp home only). Since 0.8.0 a long/workspace
-// write saves ONLY the memory file (INDEX.md is the generation script's),
+// store as every other surface (temp home only). A long/workspace write
+// saves ONLY the memory file (there is no on-disk index anymore),
 // descriptions are validated (≤1000 chars, one line), and an update without
 // a description keeps the file's existing Description line.
 
@@ -25,7 +25,7 @@ test('tool save appends to the short-term note', async () => {
   assert.ok(saved.ok === true && saved.message.includes('short-term'));
 });
 
-test('tool long writes a global file with a Description line and NO INDEX.md', async () => {
+test('tool long writes a global file with a Description line and nothing else', async () => {
   const wroteLong = await mod.runMemoryTool(
     { dshHome: fx.home, cwd: fx.nested },
     resolved,
@@ -36,7 +36,7 @@ test('tool long writes a global file with a Description line and NO INDEX.md', a
   const file = await readFile(join(fx.home, 'memories', 'global-long-term', 'tool-long-memory.md'), 'utf8');
   assert.ok(file.startsWith('# Tool long memory\n\nDescription: One-line description of the tool-written memory.\n\n'));
   await assert.rejects(access(join(fx.home, 'memories', 'global-long-term', 'INDEX.md')),
-    'a write must never create INDEX.md');
+    'a write never creates an INDEX.md');
 });
 
 test('tool long without a description writes no Description line', async () => {
@@ -96,7 +96,7 @@ test('tool workspace writes into the session workspace store', async () => {
   );
   assert.ok(wroteWs.ok === true && wroteWs.message.includes(join(fx.home, 'memories', 'workspace', 'ws')));
   await assert.rejects(access(join(fx.home, 'memories', 'workspace', 'ws', 'INDEX.md')),
-    'a workspace write must never create INDEX.md either');
+    'a workspace write never creates an INDEX.md either');
 });
 
 test('tool rejects a long/workspace write without a title', async () => {

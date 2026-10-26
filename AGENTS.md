@@ -19,11 +19,10 @@ are injected **whole** — no per-scope caps (`longTermMaxChars` /
 keys). Every memory file carries an explicit one-line `Description:` right
 after its `# Title` heading; index entries are
 `- Title (file-name.md) — description`, and files without a Description line
-are simply not listed. The plugin **never writes `INDEX.md`**: it injects the
-file when present and otherwise composes the identical document read-only in
-memory; `scripts/generate-index.mjs` (run inside a workspace, it regenerates
-that workspace's INDEX.md — the only index writer; dependency-free, same
-DSH-home precedence). Injection happens as one durable
+are simply not listed. Every index is **composed fresh in memory** from the
+files at session start — no index file is ever read or written (since 0.9.0
+there is no `INDEX.md` mechanism at all, and a stray `INDEX.md` in a store
+is treated like any other `.md`). Injection happens as one durable
 user-role baseline message spliced at the first eligible `agent/pre-step` —
 the same seam the shipped `@deepseek-ai/dsh-agent-instructions` uses for
 AGENTS.md loading. The baseline **always** carries a "your memory system"
@@ -60,7 +59,6 @@ lib/                Host modules:
   lib/surfaces.js     /memory command + agent memory tool
   lib/snapshot.js     read-only JSON payloads for the Memories tab
   lib/routes.js       the two read-only webServer routes
-scripts/generate-index.mjs  the only INDEX.md writer (regenerates the current workspace's store)
 client.js           Client plugin (Memories right-sidebar tab, session-scoped; ./client export — one module by loader constraint)
 locale/en.json      Plugin Manager display metadata (English)
 locale/zh.json      Plugin Manager display metadata (Chinese)
@@ -77,8 +75,7 @@ README.md           full design + usage documentation
   user name, the workspace root, and the profile root must not appear as
   path literals in tracked files), and — for injection-affecting changes —
   a dry-run smoke of the exported `composeBaselineText`/
-  `buildMemoriesSnapshot` plus `scripts/generate-index.mjs` against a
-  temporary DSH home.
+  `buildMemoriesSnapshot` against a temporary DSH home.
 - **Commits**: by default the user/Lead reviews and commits. Exception: a
   queued factory run may create a **local feature branch** and commit on it
   when the user explicitly authorizes it (as in the 0.8.0 run) — the branch
@@ -94,16 +91,14 @@ README.md           full design + usage documentation
   steps — tests use a temporary home under a scratch directory (the one
   authorized exception is an explicit user-requested conversion of the live
   memory stores).
-- **The plugin never writes `INDEX.md`**: only `scripts/generate-index.mjs`
-  does — run inside a workspace, it writes only that workspace's store (the
-  workspace is derived from the cwd exactly like a session's workspace; the
-  global long-term store has no generated file by design). Code changes must
-  keep the on-disk artifact and the read-only injection synthesis
-  byte-identical — both come from `composeIndexDocument` in `lib/store.js`;
-  do not fork that logic.
+- **Indexes are composed, never stored**: `composeIndexLines` in
+  `lib/store.js` is the single composer — nothing anywhere reads or writes
+  an index file, and no file name is special-cased in listing or
+  validation paths (a manually dropped `INDEX.md` is just another `.md`).
+  Do not reintroduce on-disk index artifacts or fork the composition
+  logic.
 - **Dependencies**: none. `index.js` and `lib/*.js` import `node:*` builtins
-  and `./lib/*` relative modules only; `scripts/generate-index.mjs` imports
-  `node:*` builtins and `../lib/*` only; `client.js` is one module using
+  and `./lib/*` relative modules only; `client.js` is one module using
   `window.__ModuleLoader__.load` + `require('react')` from the platform
   module table (the loader serves a single bundle per package; package-local
   chunks are async-only, so the browser half stays one file) and imports no
